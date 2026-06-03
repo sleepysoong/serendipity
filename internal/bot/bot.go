@@ -253,7 +253,19 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 	outDir := filepath.Join("output", fmt.Sprintf("discord_%d", time.Now().Unix()))
 	
 	logFunc := func(msg string) {
-		b.Session.ChannelMessageSend(channelID, msg)
+		b.mu.Lock()
+		targetChannel := b.NewsChannelID
+		b.mu.Unlock()
+		
+		if targetChannel == "" {
+			targetChannel = channelID // fallback to current channel if no news channel is set
+		}
+		
+		// Discord limits messages to 2000 chars.
+		if len(msg) > 1990 {
+			msg = msg[:1980] + "\n```" // Truncate and close markdown block safely
+		}
+		b.Session.ChannelMessageSend(targetChannel, msg)
 	}
 	
 	res, err := pipeline.Run(b.Ctx, b.Config, topic, outDir, topic == "", logFunc)
