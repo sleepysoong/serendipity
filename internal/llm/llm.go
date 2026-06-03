@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"serendipity/prompts"
 )
 
 // CardContent represents the structured slide content required by the Figma template.
@@ -53,17 +55,7 @@ func SanitizeJSON(raw string) string {
 
 // SelectTopic analyzes trending news context and selects the single best topic for card news.
 func SelectTopic(ctx context.Context, apiKey, model, trendingContext string, logf func(string)) (string, error) {
-
-	systemPrompt := `당신은 트렌디한 뉴스 편집장입니다. 제공된 최신 뉴스 검색 결과(컨텍스트)를 분석하여, 대중에게 가장 유용하고 흥미로운 단 하나의 카드뉴스 주제를 선정해야 합니다.
-
-반드시 다음 규칙을 준수해야 합니다:
-1. 피그마 검색이나 Brave Search에 재입력하기 적합한 '핵심 검색어 키워드' 또는 '구체적인 주제 명사구' 형태로 작성하십시오.
-2. 마크다운 코드 블록, 따옴표, 번호 매기기, 특수 문자 및 설명(예: "주제는 ~ 입니다" 등)을 절대로 포함하지 말고, 단 한 줄의 핵심 문구만 출력하십시오.
-
-출력 예시:
-한국은행 기준금리 동결 배경
-누리호 4차 발사 성공 및 향후 계획
-글로벌 AI 반도체 수출 실적 개선 동향`
+	systemPrompt := prompts.SelectTopicSystem
 
 	userPrompt := fmt.Sprintf("다음 최신 뉴스 목록을 보고, 카드뉴스로 만들기에 가장 적합하고 흥미진진한 하나의 핵심 주제 키워드를 한 줄로 뽑아주세요.\n\n최신 뉴스 목록:\n%s", trendingContext)
 
@@ -166,54 +158,7 @@ func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages 
 
 // GenerateCardNews orchestrates the OpenRouter request and handles response parsing with retries and exponential backoff.
 func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext string, logf func(string)) ([]CardContent, error) {
-
-	systemPrompt := `당신은 전문 콘텐츠 크리에이터입니다. 제공된 검색 컨텍스트에서 주요 뉴스 포인트를 추출하여 순차적인 카드뉴스 슬라이드로 포맷팅하는 것이 당신의 임무입니다.
-
-반드시 다음 규칙을 준수해야 합니다:
-1. 출력은 반드시 순수 JSON 배열 형식이어야 합니다. 마크다운 코드 블록 표기(예: ` + "`" + "`" + "`" + `json)나 JSON 외부의 어떠한 설명도 포함하지 마십시오.
-2. 배열의 각 객체는 오직 "title"과 "body" 두 개의 키만 가져야 합니다.
-3. 엄격한 글자 수 제한:
-   - "title": 반드시 한글/영어 공통 15자 이내여야 합니다. 강렬하고 핵심적이게 만드십시오!
-   - "body": 반드시 한글/영어 공통 50자 이내여야 합니다. 간결하게 요약하십시오!
-4. 각 슬라이드는 논리적으로 자연스럽게 이어져야 하며 이해하기 쉬워야 합니다.
-
-예상되는 출력 형식의 Few-Shot 예시:
-
-예시 1:
-[
-  {
-    "title": "금리 동결 결정",
-    "body": "한국은행이 기준금리를 연 3.5%로 유지하며 향후 추이를 지켜보기로 했습니다."
-  },
-  {
-    "title": "물가 상승 지속",
-    "body": "소비자 물가 상승률이 3%대를 이어가 고금리 장기화 가능성이 대두되었습니다."
-  }
-]
-
-예시 2:
-[
-  {
-    "title": "AI 반도체 급성장",
-    "body": "글로벌 인공지능 수요의 폭증으로 인해 차세대 메모리 칩 판매가 급증했습니다."
-  },
-  {
-    "title": "패키징 기술 경쟁",
-    "body": "시장 주도권 선점을 위한 차세대 고대역폭 메모리 공정 경쟁이 심화되고 있습니다."
-  }
-]
-
-예시 3:
-[
-  {
-    "title": "전기차 판매 둔화",
-    "body": "보조금 축소와 충전기 부족 여파로 올해 글로벌 친환경차 성장이 둔화되었습니다."
-  },
-  {
-    "title": "하이브리드 대안",
-    "body": "제조사들은 공백을 극복하기 위해 신형 하이브리드 제품 출시를 확대 중입니다."
-  }
-]`
+	systemPrompt := prompts.GenerateCardNewsSystem
 
 	userPrompt := fmt.Sprintf("다음 뉴스 검색 결과를 기반으로 순차적인 3개의 카드뉴스 슬라이드를 생성해 주세요. 글자 수 제한(제목 15자 이내, 본문 50자 이내)을 반드시 기억하세요.\n\n컨텍스트:\n%s", groundingContext)
 
