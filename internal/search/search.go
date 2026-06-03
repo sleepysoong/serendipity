@@ -31,10 +31,10 @@ type SearchResponse struct {
 // and merges their titles and descriptions into a single logical text block for grounding.
 func Search(ctx context.Context, apiKey, query string, topN int) (string, error) {
 	if apiKey == "" {
-		return "", fmt.Errorf("Brave API Key is empty")
+		return "", fmt.Errorf("Brave API 키가 비어있습니다")
 	}
 	if query == "" {
-		return "", fmt.Errorf("search query is empty")
+		return "", fmt.Errorf("검색 쿼리가 비어있습니다")
 	}
 	if topN <= 0 {
 		topN = 3 // default to top 3 results
@@ -47,7 +47,7 @@ func Search(ctx context.Context, apiKey, query string, topN int) (string, error)
 	endpoint := "https://api.search.brave.com/res/v1/web/search"
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse Brave Search API URL: %w", err)
+		return "", fmt.Errorf("Brave Search API URL 파싱 실패: %w", err)
 	}
 
 	q := u.Query()
@@ -56,7 +56,7 @@ func Search(ctx context.Context, apiKey, query string, topN int) (string, error)
 
 	req, err := http.NewRequestWithContext(searchCtx, "GET", u.String(), nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create search HTTP request: %w", err)
+		return "", fmt.Errorf("검색 HTTP 요청 생성 실패: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -65,23 +65,23 @@ func Search(ctx context.Context, apiKey, query string, topN int) (string, error)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Brave Search request failed: %w", err)
+		return "", fmt.Errorf("Brave Search 요청 실패: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Brave Search returned non-200 status code: %d, response: %s", resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("Brave Search가 200이 아닌 상태 코드를 반환했습니다: %d, 응답: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read Brave Search response body: %w", err)
+		return "", fmt.Errorf("Brave Search 응답 바디를 읽지 못했습니다: %w", err)
 	}
 
 	var searchResponse SearchResponse
 	if err := json.Unmarshal(bodyBytes, &searchResponse); err != nil {
-		return "", fmt.Errorf("failed to unmarshal Brave Search response: %w", err)
+		return "", fmt.Errorf("Brave Search 응답 파싱 실패: %w", err)
 	}
 
 	var textBlock []string
@@ -93,7 +93,7 @@ func Search(ctx context.Context, apiKey, query string, topN int) (string, error)
 
 	for i := 0; i < limit; i++ {
 		res := searchResponse.Web.Results[i]
-		block := fmt.Sprintf("[%d] Title: %s\nDescription: %s", i+1, res.Title, res.Description)
+		block := fmt.Sprintf("[%d] 제목: %s\n설명: %s", i+1, res.Title, res.Description)
 		textBlock = append(textBlock, block)
 	}
 

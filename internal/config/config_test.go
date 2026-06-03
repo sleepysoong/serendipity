@@ -15,7 +15,7 @@ func TestLoadConfig_MissingEnv(t *testing.T) {
 
 	_, err := LoadConfig(ctx, "manifest.json")
 	if err == nil {
-		t.Fatal("expected error due to missing environment variables, got nil")
+		t.Fatal("환경 변수 누락으로 인한 에러를 예상했으나 nil을 받았습니다")
 	}
 }
 
@@ -35,32 +35,32 @@ func TestLoadConfig_Success(t *testing.T) {
 	manifestPath := filepath.Join(tempDir, "test_manifest.json")
 	manifestContent := `{"Card_Page_1_Title": "node-1", "Card_Page_1_Body": "node-2"}`
 	if err := os.WriteFile(manifestPath, []byte(manifestContent), 0644); err != nil {
-		t.Fatalf("failed to write temp manifest: %v", err)
+		t.Fatalf("임시 매니페스트 파일 생성 실패: %v", err)
 	}
 
 	cfg, err := LoadConfig(ctx, manifestPath)
 	if err != nil {
-		t.Fatalf("LoadConfig failed: %v", err)
+		t.Fatalf("LoadConfig 실패: %v", err)
 	}
 
 	if cfg.BraveAPIKey != "brave-test-key" {
-		t.Errorf("expected BraveAPIKey 'brave-test-key', got %q", cfg.BraveAPIKey)
+		t.Errorf("BraveAPIKey 값 불일치: 예상 'brave-test-key', 실제 %q", cfg.BraveAPIKey)
 	}
 	if cfg.OpenRouterAPIKey != "openrouter-test-key" {
-		t.Errorf("expected OpenRouterAPIKey 'openrouter-test-key', got %q", cfg.OpenRouterAPIKey)
+		t.Errorf("OpenRouterAPIKey 값 불일치: 예상 'openrouter-test-key', 실제 %q", cfg.OpenRouterAPIKey)
 	}
 	if cfg.FigmaPAT != "figma-test-pat" {
-		t.Errorf("expected FigmaPAT 'figma-test-pat', got %q", cfg.FigmaPAT)
+		t.Errorf("FigmaPAT 값 불일치: 예상 'figma-test-pat', 실제 %q", cfg.FigmaPAT)
 	}
 	if cfg.FigmaFileKey != "figma-test-file-key" {
-		t.Errorf("expected FigmaFileKey 'figma-test-file-key', got %q", cfg.FigmaFileKey)
+		t.Errorf("FigmaFileKey 값 불일치: 예상 'figma-test-file-key', 실제 %q", cfg.FigmaFileKey)
 	}
 	if cfg.FigmaMCPEndpoint != "figma-test-mcp-endpoint" {
-		t.Errorf("expected FigmaMCPEndpoint 'figma-test-mcp-endpoint', got %q", cfg.FigmaMCPEndpoint)
+		t.Errorf("FigmaMCPEndpoint 값 불일치: 예상 'figma-test-mcp-endpoint', 실제 %q", cfg.FigmaMCPEndpoint)
 	}
 
 	nodeVal, ok := cfg.NodeMappings["Card_Page_1_Title"]
 	if !ok || nodeVal != "node-1" {
-		t.Errorf("expected mapping Card_Page_1_Title -> 'node-1', got %q (ok=%t)", nodeVal, ok)
+		t.Errorf("노드 매핑 값 불일치: 예상 Card_Page_1_Title -> 'node-1', 실제 %q (존재여부=%t)", nodeVal, ok)
 	}
 }

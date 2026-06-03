@@ -40,12 +40,12 @@ func UpdateCanvas(ctx context.Context, figmaPAT, figmaMCPEndpoint string, mappin
 		"X-Figma-Token": figmaPAT,
 	}))
 	if err != nil {
-		return beforeMCPTime, fmt.Errorf("failed to create Figma SSE MCP Client: %w", err)
+		return beforeMCPTime, fmt.Errorf("Figma SSE MCP 클라이언트 생성 실패: %w", err)
 	}
 
 	// 3. Start client transport
 	if err := cli.Start(ctx); err != nil {
-		return beforeMCPTime, fmt.Errorf("failed to start Figma MCP client transport: %w", err)
+		return beforeMCPTime, fmt.Errorf("Figma MCP 클라이언트 전송 채널(Start) 시작 실패: %w", err)
 	}
 	defer cli.Close()
 
@@ -59,7 +59,7 @@ func UpdateCanvas(ctx context.Context, figmaPAT, figmaMCPEndpoint string, mappin
 	}
 
 	if _, err := cli.Initialize(ctx, initRequest); err != nil {
-		return beforeMCPTime, fmt.Errorf("failed to initialize Figma MCP session: %w", err)
+		return beforeMCPTime, fmt.Errorf("Figma MCP 세션 초기화 실패: %w", err)
 	}
 
 	// 5. Iterate through LLM cards and update each corresponding Figma text node
@@ -70,22 +70,22 @@ func UpdateCanvas(ctx context.Context, figmaPAT, figmaMCPEndpoint string, mappin
 
 		titleNodeID, ok := mappings[titleLogicalKey]
 		if !ok {
-			return beforeMCPTime, fmt.Errorf("node mapping for logical identifier %q not found in manifest", titleLogicalKey)
+			return beforeMCPTime, fmt.Errorf("매니페스트에서 논리적 식별자 %q에 해당하는 노드 매핑을 찾을 수 없습니다: %w", titleLogicalKey, err)
 		}
 
 		bodyNodeID, ok := mappings[bodyLogicalKey]
 		if !ok {
-			return beforeMCPTime, fmt.Errorf("node mapping for logical identifier %q not found in manifest", bodyLogicalKey)
+			return beforeMCPTime, fmt.Errorf("매니페스트에서 논리적 식별자 %q에 해당하는 노드 매핑을 찾을 수 없습니다: %w", bodyLogicalKey, err)
 		}
 
 		// Update Title Node
 		if err := setNodeText(ctx, cli, titleNodeID, card.Title); err != nil {
-			return beforeMCPTime, fmt.Errorf("failed to set text content for %s (%s): %w", titleLogicalKey, titleNodeID, err)
+			return beforeMCPTime, fmt.Errorf("%s (%s)의 텍스트 콘텐츠 설정 실패: %w", titleLogicalKey, titleNodeID, err)
 		}
 
 		// Update Body Node
 		if err := setNodeText(ctx, cli, bodyNodeID, card.Body); err != nil {
-			return beforeMCPTime, fmt.Errorf("failed to set text content for %s (%s): %w", bodyLogicalKey, bodyNodeID, err)
+			return beforeMCPTime, fmt.Errorf("%s (%s)의 텍스트 콘텐츠 설정 실패: %w", bodyLogicalKey, bodyNodeID, err)
 		}
 	}
 
@@ -106,11 +106,11 @@ func setNodeText(ctx context.Context, cli *client.Client, nodeID, textContent st
 
 	res, err := cli.CallTool(ctx, req)
 	if err != nil {
-		return fmt.Errorf("MCP CallTool set_text_content failed: %w", err)
+		return fmt.Errorf("MCP CallTool set_text_content 호출 실패: %w", err)
 	}
 
 	if res.IsError {
-		return fmt.Errorf("MCP CallTool set_text_content returned error status in response")
+		return fmt.Errorf("MCP CallTool set_text_content 응답에서 에러 상태를 반환했습니다")
 	}
 
 	return nil
@@ -132,20 +132,20 @@ func PollVersion(ctx context.Context, figmaPAT, fileKey string, beforeMCPTime ti
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
 		case <-pollCtx.Done():
-			return fmt.Errorf("version polling context cancelled or timed out: %w", pollCtx.Err())
+			return fmt.Errorf("버전 폴링 컨텍스트가 취소되었거나 타임아웃되었습니다: %w", pollCtx.Err())
 		default:
 		}
 
 		req, err := http.NewRequestWithContext(pollCtx, "GET", endpoint, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create file metadata HTTP request: %w", err)
+			return fmt.Errorf("파일 메타데이터 HTTP 요청 생성 실패: %w", err)
 		}
 
 		req.Header.Set("X-Figma-Token", figmaPAT)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("figma file metadata request failed: %w", err)
+			return fmt.Errorf("Figma 파일 메타데이터 요청 실패: %w", err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -155,27 +155,27 @@ func PollVersion(ctx context.Context, figmaPAT, fileKey string, beforeMCPTime ti
 				time.Sleep(interval)
 				continue
 			}
-			return fmt.Errorf("figma file API returned non-200 status code: %d", resp.StatusCode)
+			return fmt.Errorf("Figma 파일 API가 200이 아닌 상태 코드 %d를 반환했습니다", resp.StatusCode)
 		}
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			return fmt.Errorf("failed to read figma file response body: %w", err)
+			return fmt.Errorf("Figma 파일 응답 바디 읽기 실패: %w", err)
 		}
 
 		var fileResp FileResponse
 		if err := json.Unmarshal(bodyBytes, &fileResp); err != nil {
-			return fmt.Errorf("failed to unmarshal figma file response JSON: %w", err)
+			return fmt.Errorf("Figma 파일 응답 JSON 파싱 실패: %w", err)
 		}
 
 		if fileResp.LastModified == "" {
-			return fmt.Errorf("lastModified field missing in Figma response")
+			return fmt.Errorf("Figma 응답에 lastModified 필드가 누락되었습니다")
 		}
 
 		lastModifiedTime, err := time.Parse(time.RFC3339, fileResp.LastModified)
 		if err != nil {
-			return fmt.Errorf("failed to parse Figma lastModified time (%s): %w", fileResp.LastModified, err)
+			return fmt.Errorf("Figma lastModified 시간(%s) 파싱 실패: %w", fileResp.LastModified, err)
 		}
 
 		// Check if Figma lastModified is strictly in the future relative to our pre-MCP capture timestamp
@@ -187,18 +187,18 @@ func PollVersion(ctx context.Context, figmaPAT, fileKey string, beforeMCPTime ti
 		// Wait 500ms before next poll attempt
 		select {
 		case <-pollCtx.Done():
-			return fmt.Errorf("version polling timed out: %w", pollCtx.Err())
+			return fmt.Errorf("버전 폴링 타임아웃: %w", pollCtx.Err())
 		case <-time.After(interval):
 		}
 	}
 
-	return fmt.Errorf("failed to verify canvas update after maximum 10 version poll attempts")
+	return fmt.Errorf("최대 10회 버전 폴링 시도 후 캔버스 업데이트 확인 실패")
 }
 
 // ExportImages calls Figma REST API's image export endpoint to render target frame node IDs.
 func ExportImages(ctx context.Context, figmaPAT, fileKey string, nodeIDs []string) (map[string]string, error) {
 	if len(nodeIDs) == 0 {
-		return nil, fmt.Errorf("no node IDs specified for image export")
+		return nil, fmt.Errorf("이미지 내보내기를 위한 노드 ID가 지정되지 않았습니다")
 	}
 
 	idsParam := strings.Join(nodeIDs, ",")
@@ -206,7 +206,7 @@ func ExportImages(ctx context.Context, figmaPAT, fileKey string, nodeIDs []strin
 
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create image export request: %w", err)
+		return nil, fmt.Errorf("이미지 내보내기 요청 생성 실패: %w", err)
 	}
 
 	req.Header.Set("X-Figma-Token", figmaPAT)
@@ -214,27 +214,27 @@ func ExportImages(ctx context.Context, figmaPAT, fileKey string, nodeIDs []strin
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("figma image export request failed: %w", err)
+		return nil, fmt.Errorf("Figma 이미지 내보내기 요청 실패: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("figma image export returned status: %d, response: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("Figma 이미지 내보내기가 상태 코드 %d를 반환했습니다. 응답: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read export response body: %w", err)
+		return nil, fmt.Errorf("내보내기 응답 바디 읽기 실패: %w", err)
 	}
 
 	var exportResp ExportResponse
 	if err := json.Unmarshal(bodyBytes, &exportResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal image export response JSON: %w", err)
+		return nil, fmt.Errorf("이미지 내보내기 응답 JSON 파싱 실패: %w", err)
 	}
 
 	if len(exportResp.Images) == 0 {
-		return nil, fmt.Errorf("figma export returned no image links in response")
+		return nil, fmt.Errorf("Figma 내보내기 응답에 이미지 링크가 없습니다")
 	}
 
 	return exportResp.Images, nil
@@ -244,29 +244,29 @@ func ExportImages(ctx context.Context, figmaPAT, fileKey string, nodeIDs []strin
 func DownloadImage(ctx context.Context, imageURL, outputPath string) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", imageURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create image download request: %w", err)
+		return fmt.Errorf("이미지 다운로드 요청 생성 실패: %w", err)
 	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to execute image download: %w", err)
+		return fmt.Errorf("이미지 다운로드 실행 실패: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("image download returned status code: %d", resp.StatusCode)
+		return fmt.Errorf("이미지 다운로드가 상태 코드 %d를 반환했습니다", resp.StatusCode)
 	}
 
 	out, err := os.Create(outputPath)
 	if err != nil {
-		return fmt.Errorf("failed to create local output file %s: %w", outputPath, err)
+		return fmt.Errorf("로컬 출력 파일 %s 생성 실패: %w", outputPath, err)
 	}
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to copy binary stream to local file: %w", err)
+		return fmt.Errorf("바이너리 스트림을 로컬 파일로 복사하는 데 실패했습니다: %w", err)
 	}
 
 	return nil

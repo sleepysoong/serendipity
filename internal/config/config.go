@@ -23,33 +23,33 @@ func LoadConfig(ctx context.Context, manifestPath string) (*Config, error) {
 	// Context check to support early cancellation
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context cancelled during config load: %w", ctx.Err())
+		return nil, fmt.Errorf("설정 로드 중 컨텍스트가 취소되었습니다: %w", ctx.Err())
 	default:
 	}
 
 	braveKey := os.Getenv("BRAVE_API_KEY")
 	if braveKey == "" {
-		return nil, fmt.Errorf("BRAVE_API_KEY environment variable is required")
+		return nil, fmt.Errorf("BRAVE_API_KEY 환경 변수가 설정되지 않았습니다")
 	}
 
 	openRouterKey := os.Getenv("OPENROUTER_API_KEY")
 	if openRouterKey == "" {
-		return nil, fmt.Errorf("OPENROUTER_API_KEY environment variable is required")
+		return nil, fmt.Errorf("OPENROUTER_API_KEY 환경 변수가 설정되지 않았습니다")
 	}
 
 	figmaPAT := os.Getenv("FIGMA_PAT")
 	if figmaPAT == "" {
-		return nil, fmt.Errorf("FIGMA_PAT environment variable is required")
+		return nil, fmt.Errorf("FIGMA_PAT 환경 변수가 설정되지 않았습니다")
 	}
 
 	figmaFileKey := os.Getenv("FIGMA_FILE_KEY")
 	if figmaFileKey == "" {
-		return nil, fmt.Errorf("FIGMA_FILE_KEY environment variable is required")
+		return nil, fmt.Errorf("FIGMA_FILE_KEY 환경 변수가 설정되지 않았습니다")
 	}
 
 	figmaMCPEndpoint := os.Getenv("FIGMA_MCP_ENDPOINT")
 	if figmaMCPEndpoint == "" {
-		return nil, fmt.Errorf("FIGMA_MCP_ENDPOINT environment variable is required")
+		return nil, fmt.Errorf("FIGMA_MCP_ENDPOINT 환경 변수가 설정되지 않았습니다")
 	}
 
 	if manifestPath == "" {
@@ -58,12 +58,12 @@ func LoadConfig(ctx context.Context, manifestPath string) (*Config, error) {
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest file at %s: %w", manifestPath, err)
+		return nil, fmt.Errorf("매니페스트 파일(%s)을 읽지 못했습니다: %w", manifestPath, err)
 	}
 
 	var mappings map[string]string
 	if err := json.Unmarshal(data, &mappings); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal manifest data from %s: %w", manifestPath, err)
+		return nil, fmt.Errorf("매니페스트 파일(%s) 파싱에 실패했습니다: %w", manifestPath, err)
 	}
 
 	return &Config{

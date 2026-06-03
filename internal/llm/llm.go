@@ -55,19 +55,19 @@ func SanitizeJSON(raw string) string {
 func GenerateCardNews(ctx context.Context, apiKey, groundingContext string) ([]CardContent, error) {
 	model := "google/gemma-4-31b-it:free"
 
-	systemPrompt := `You are a professional content creator. Your task is to extract key news points from the provided search context and format them as sequential card news slides.
+	systemPrompt := `당신은 전문 콘텐츠 크리에이터입니다. 제공된 검색 컨텍스트에서 주요 뉴스 포인트를 추출하여 순차적인 카드뉴스 슬라이드로 포맷팅하는 것이 당신의 임무입니다.
 
-You MUST follow these rules:
-1. Output MUST be a pure JSON array of objects. Do not include markdown code block wrappers (like ` + "`" + "`" + "`" + `json) or any explanation outside the JSON.
-2. Each object in the array must contain only two keys: "title" and "body".
-3. STRICT CHARACTER LIMITS:
-   - "title": MUST NOT exceed 15 characters (Korean/English inclusive). Keep it punchy!
-   - "body": MUST NOT exceed 50 characters (Korean/English inclusive). Make it concise!
-4. The slides should flow logically and be easy to understand.
+반드시 다음 규칙을 준수해야 합니다:
+1. 출력은 반드시 순수 JSON 배열 형식이어야 합니다. 마크다운 코드 블록 표기(예: ` + "`" + "`" + "`" + `json)나 JSON 외부의 어떠한 설명도 포함하지 마십시오.
+2. 배열의 각 객체는 오직 "title"과 "body" 두 개의 키만 가져야 합니다.
+3. 엄격한 글자 수 제한:
+   - "title": 반드시 한글/영어 공통 15자 이내여야 합니다. 강렬하고 핵심적이게 만드십시오!
+   - "body": 반드시 한글/영어 공통 50자 이내여야 합니다. 간결하게 요약하십시오!
+4. 각 슬라이드는 논리적으로 자연스럽게 이어져야 하며 이해하기 쉬워야 합니다.
 
-Few-Shot Examples of Expected Output format:
+예상되는 출력 형식의 Few-Shot 예시:
 
-Example 1:
+예시 1:
 [
   {
     "title": "금리 동결 결정",
@@ -79,7 +79,7 @@ Example 1:
   }
 ]
 
-Example 2:
+예시 2:
 [
   {
     "title": "AI 반도체 급성장",
@@ -91,7 +91,7 @@ Example 2:
   }
 ]
 
-Example 3:
+예시 3:
 [
   {
     "title": "전기차 판매 둔화",
@@ -103,7 +103,7 @@ Example 3:
   }
 ]`
 
-	userPrompt := fmt.Sprintf("Based on the following news search results, generate 3 sequential card news slides. Remember the character limits: Title <= 15 chars, Body <= 50 chars.\n\nContext:\n%s", groundingContext)
+	userPrompt := fmt.Sprintf("다음 뉴스 검색 결과를 기반으로 순차적인 3개의 카드뉴스 슬라이드를 생성해 주세요. 글자 수 제한(제목 15자 이내, 본문 50자 이내)을 반드시 기억하세요.\n\n컨텍스트:\n%s", groundingContext)
 
 	messages := []Message{
 		{Role: "system", Content: systemPrompt},
@@ -125,13 +125,13 @@ Example 3:
 			delay := baseDelay * time.Duration(1<<(attempt-1))
 			select {
 			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during LLM generation retry backoff: %w", ctx.Err())
+				return nil, fmt.Errorf("LLM 생성 재시도 대기 중 컨텍스트가 취소되었습니다: %w", ctx.Err())
 			case <-time.After(delay):
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("failed to generate and parse card news after 3 attempts: %w", lastErr)
+	return nil, fmt.Errorf("3회 시도 후 카드뉴스 생성 및 파싱에 실패했습니다: %w", lastErr)
 }
 
 func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages []Message) ([]CardContent, error) {
@@ -143,7 +143,7 @@ func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages 
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal OpenRouter request: %w", err)
+		return nil, fmt.Errorf("OpenRouter 요청 직렬화 실패: %w", err)
 	}
 
 	// Set API call timeout to 15 seconds
@@ -152,7 +152,7 @@ func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages 
 
 	req, err := http.NewRequestWithContext(apiCtx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OpenRouter HTTP request: %w", err)
+		return nil, fmt.Errorf("OpenRouter HTTP 요청 생성 실패: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -163,27 +163,27 @@ func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("OpenRouter API call failed: %w", err)
+		return nil, fmt.Errorf("OpenRouter API 호출 실패: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("OpenRouter returned status code: %d, response: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("OpenRouter가 상태 코드 %d를 반환했습니다. 응답: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read OpenRouter response: %w", err)
+		return nil, fmt.Errorf("OpenRouter 응답 읽기 실패: %w", err)
 	}
 
 	var chatResponse ChatCompletionResponse
 	if err := json.Unmarshal(bodyBytes, &chatResponse); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal OpenRouter response JSON: %w", err)
+		return nil, fmt.Errorf("OpenRouter 응답 JSON 파싱 실패: %w", err)
 	}
 
 	if len(chatResponse.Choices) == 0 {
-		return nil, fmt.Errorf("OpenRouter returned response with no completion choices")
+		return nil, fmt.Errorf("OpenRouter 응답에 완성 결과(Choices)가 없습니다")
 	}
 
 	rawContent := chatResponse.Choices[0].Message.Content
@@ -191,16 +191,16 @@ func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages 
 
 	var cards []CardContent
 	if err := json.Unmarshal([]byte(sanitized), &cards); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sanitized JSON into CardContent slice (Raw: %q, Sanitized: %q): %w", rawContent, sanitized, err)
+		return nil, fmt.Errorf("정제된 JSON을 CardContent 슬라이스로 파싱하는 데 실패했습니다 (Raw: %q, Sanitized: %q): %w", rawContent, sanitized, err)
 	}
 
 	// Validate character counts as an extra programmatic guard rail
 	for idx, card := range cards {
 		if len([]rune(card.Title)) > 15 {
-			return nil, fmt.Errorf("validation failed: card %d title length %d exceeds 15 chars", idx+1, len([]rune(card.Title)))
+			return nil, fmt.Errorf("유효성 검사 실패: %d번째 카드의 제목 길이(%d자)가 15자를 초과합니다", idx+1, len([]rune(card.Title)))
 		}
 		if len([]rune(card.Body)) > 50 {
-			return nil, fmt.Errorf("validation failed: card %d body length %d exceeds 50 chars", idx+1, len([]rune(card.Body)))
+			return nil, fmt.Errorf("유효성 검사 실패: %d번째 카드의 본문 길이(%d자)가 50자를 초과합니다", idx+1, len([]rune(card.Body)))
 		}
 	}
 
