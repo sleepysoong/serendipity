@@ -43,8 +43,7 @@ cd serendipity
 # 의존성 설치
 go mod tidy
 
-# CLI 및 Bot 빌드
-go build -o cardnews ./cmd/cardnews/
+# 봇 빌드
 go build -o bot ./cmd/bot/
 ```
 
@@ -52,26 +51,13 @@ go build -o bot ./cmd/bot/
 
 ## 4. 실행 방법
 
-### 4.1 디스코드 봇 모드 (권장)
+### 디스코드 봇 구동
 디스코드 봇을 백그라운드로 띄워 상시 구동합니다.
 ```bash
 ./bot
 ```
 - `/뉴스생성 [주제]`: 뉴스 생성 (주제를 비우면 자동 탐색)
 - `/세팅`: 봇 설정 변경 및 자동 스케줄 채널 지정
-
-### 4.2 CLI 수동 모드
-테스트나 단발성 실행을 위한 기존 CLI 모드도 지원합니다.
-```bash
-# 자동 주제 선정 및 생성
-./cardnews -output output -topn 3
-
-# 수동 검색 쿼리로 생성
-./cardnews -query "한국은행 기준금리 동결" -output output
-
-# 모델이나 배경 이미지 수동 지정
-./cardnews -model "meta-llama/llama-3-70b-instruct:free" -bg custom_bg.jpg
-```
 
 ---
 
@@ -80,10 +66,8 @@ go build -o bot ./cmd/bot/
 ```
 serendipity/
 ├── cmd/
-│   ├── bot/
-│   │   └── main.go          # 디스코드 봇 진입점
-│   └── cardnews/
-│       └── main.go          # 기존 CLI 진입점
+│   └── bot/
+│       └── main.go          # 디스코드 봇 진입점
 ├── internal/
 │   ├── bot/               # 디스코드 슬래시 커맨드 및 스케줄러 로직
 │   ├── config/            # config.yml 파싱 및 저장 로직
