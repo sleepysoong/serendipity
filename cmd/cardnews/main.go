@@ -25,6 +25,7 @@ func main() {
 	autoFlag := flag.Bool("auto", true, "자동으로 오늘의 뉴스 주제를 선정할지 여부")
 	modelFlag := flag.String("model", "", "사용할 LLM 모델명 (비어있으면 환경 변수 LLM_MODEL 또는 기본 gemma-4 모델 사용)")
 	outputDirFlag := flag.String("output", "output", "생성된 카드뉴스 PNG를 저장할 로컬 디렉토리")
+	bgFlag := flag.String("bg", "", "배경 이미지 파일 경로 (미지정 시 기본 어두운 그라디언트 사용)")
 	topNFlag := flag.Int("topn", 3, "수집할 Brave Search 검색 결과 개수")
 	flag.Parse()
 
@@ -44,7 +45,7 @@ func main() {
 	log.Printf("상위 N개 결과: %d", *topNFlag)
 
 	// 파이프라인 실행
-	if err := runPipeline(ctx, *queryFlag, *modelFlag, *outputDirFlag, *topNFlag, autoSelect); err != nil {
+	if err := runPipeline(ctx, *queryFlag, *modelFlag, *outputDirFlag, *bgFlag, *topNFlag, autoSelect); err != nil {
 		log.Printf("[치명적 오류] 파이프라인 실행 실패: %v", err)
 		os.Exit(1)
 	}
@@ -57,8 +58,8 @@ func main() {
 // 1.5. (자동 모드) 뉴스거리 자동 선정
 // 2. Brave Search로 데이터 수집
 // 3. LLM으로 구조화된 카드 콘텐츠 생성
-// 4. HTML 렌더링 + chromedp 스크린샷으로 PNG 생성
-func runPipeline(ctx context.Context, query, modelOverride, outputDir string, topN int, autoSelect bool) error {
+// 4. Go 이미지 라이브러리(gg)로 카드뉴스 이미지 렌더링
+func runPipeline(ctx context.Context, query, modelOverride, outputDir, bgImagePath string, topN int, autoSelect bool) error {
 	// 1단계: 환경 설정 로드
 	log.Println("[1/4] 설정을 불러오는 중...")
 	cfg, err := config.LoadConfig(ctx)
@@ -116,7 +117,7 @@ func runPipeline(ctx context.Context, query, modelOverride, outputDir string, to
 
 	// 4단계: Go 이미지 라이브러리(gg)로 카드뉴스 PNG 생성
 	log.Println("[4/4] Go 이미지 라이브러리(gg)로 카드뉴스 이미지를 렌더링하는 중...")
-	if err := renderer.RenderCards(ctx, cards, outputDir); err != nil {
+	if err := renderer.RenderCards(ctx, cards, outputDir, bgImagePath); err != nil {
 		return fmt.Errorf("카드 이미지 렌더링 단계 실패: %w", err)
 	}
 

@@ -77,6 +77,12 @@ go run cmd/cardnews/main.go -query "한국은행 기준금리 동결" -output ou
 go run cmd/cardnews/main.go -model "meta-llama/llama-3-70b-instruct:free" -output output
 ```
 
+### 4.4 배경 이미지 지정 모드
+카드뉴스에 사용할 배경 이미지를 지정할 수 있습니다. 미지정 시 기본 어두운 그라디언트를 사용합니다.
+```bash
+go run cmd/cardnews/main.go -bg background.jpg -output output
+```
+
 ### CLI 플래그 요약
 | 플래그 | 기본값 | 설명 |
 |--------|--------|------|
@@ -84,6 +90,7 @@ go run cmd/cardnews/main.go -model "meta-llama/llama-3-70b-instruct:free" -outpu
 | `-auto` | `true` | 자동 뉴스거리 선정 모드 활성화 여부 |
 | `-model` | 환경변수 or `gemma-4` | 사용할 LLM 모델명 |
 | `-output` | `output` | 생성된 PNG 저장 디렉토리 |
+| `-bg` | (미지정) | 배경 이미지 파일 경로 |
 | `-topn` | `3` | Brave Search 수집 결과 개수 |
 
 ---
@@ -117,7 +124,7 @@ serendipity/
 │   ├── llm/
 │   │   └── llm.go           # LLM 주제 선정 및 카드 콘텐츠 생성
 │   ├── renderer/
-│   │   └── renderer.go      # HTML 템플릿 + chromedp 이미지 렌더링
+│   │   └── renderer.go      # gg 이미지 라이브러리 카드뉴스 렌더링
 │   └── search/
 │       └── search.go        # Brave Search API 연동
 ├── go.mod
