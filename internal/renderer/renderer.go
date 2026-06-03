@@ -206,8 +206,8 @@ func drawBottomDim(dc *gg.Context) {
 	// CSS gradient 방향: to top (bottom→top)
 	// gg.NewLinearGradient(x0, y0, x1, y1): 색상 정지점 0.0은 (x0,y0), 1.0은 (x1,y1)
 	grad := gg.NewLinearGradient(0, float64(cardH), 0, gradTop)
-	grad.AddColorStop(0, color.RGBA{A: 217})  // 0%: rgba(0,0,0,0.85) → 0.85×255≈217
-	grad.AddColorStop(0.4, color.RGBA{A: 102}) // 40%: rgba(0,0,0,0.4) → 0.4×255≈102
+	grad.AddColorStop(0, color.RGBA{A: 255})  // 0%: rgba(0,0,0,1.0) (강하게 수정)
+	grad.AddColorStop(0.4, color.RGBA{A: 178}) // 40%: rgba(0,0,0,0.7) (강하게 수정)
 	grad.AddColorStop(1, color.RGBA{A: 0})     // 100%: transparent
 
 	dc.SetFillStyle(grad)
@@ -228,7 +228,7 @@ func drawBottomDim(dc *gg.Context) {
 //   - 색상: text-white, text-shadow: 1px 1px 3px rgba(0,0,0,0.5)
 func drawWatermark(dc *gg.Context, cafe24Path string) {
 	fontSize := 48.0                // text-xl(20px) × 2.4
-	spacing := -0.12 * fontSize     // 자간 -12%
+	spacing := -0.10 * fontSize     // 자간 -10%
 	x := 58.0                       // left-6(24px) × 2.4
 	topY := 58.0                    // top-6(24px) × 2.4
 	baselineY := topY + fontSize*0.8 // 대략적 ascent 위치
@@ -240,11 +240,11 @@ func drawWatermark(dc *gg.Context, cafe24Path string) {
 
 	// 텍스트 그림자 (CSS: text-shadow: 1px 1px 3px rgba(0,0,0,0.5) → 스케일 적용)
 	dc.SetColor(color.RGBA{A: 128})
-	drawTextWithSpacing(dc, "@sleepysoong", x+scaleFactor, baselineY+scaleFactor, spacing)
+	drawTextWithSpacing(dc, "@brrreeeeeze", x+scaleFactor, baselineY+scaleFactor, spacing)
 
 	// 실제 텍스트 (흰색)
 	dc.SetColor(color.White)
-	drawTextWithSpacing(dc, "@sleepysoong", x, baselineY, spacing)
+	drawTextWithSpacing(dc, "@brrreeeeeze", x, baselineY, spacing)
 }
 
 // ============================================================================
