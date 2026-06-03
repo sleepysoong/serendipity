@@ -50,7 +50,8 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.Identify.Intents |= discordgo.IntentMessageContent
+	// 메시지 수신 및 내용 분석을 위해 필수적인 Gateway Intent들을 등록합니다.
+	s.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentMessageContent | discordgo.IntentsGuilds
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -286,6 +287,14 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 			_, err := b.Session.ChannelMessageSend(targetChannel, chunk)
 			if err != nil {
 				log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
+				// 권한(403 등)이나 설정 문제로 전송에 실패할 시, 현재 명령이 실행된 채널로 최후의 폴백 전송을 시도합니다.
+				if targetChannel != channelID && channelID != "" {
+					log.Printf("현재 채널(%s)로 로그 전송 재시도...", channelID)
+					_, fallbackErr := b.Session.ChannelMessageSend(channelID, "[로그 폴백] "+chunk)
+					if fallbackErr != nil {
+						log.Printf("현재 채널(%s)로의 로그 폴백 전송도 실패: %v", channelID, fallbackErr)
+					}
+				}
 			}
 		}
 	}
@@ -306,14 +315,16 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 	}
 
 	// 이미지 파일 로드 (첫 번째 변형의 첫 번째 카드 표지)
+	// 디스크 캐싱 방지를 위해 파일명에 타임스탬프를 부여합니다.
 	var files []*discordgo.File
+	nowTs := time.Now().Unix()
 	for v, dir := range res.OutputDirs {
 		// 각 variation의 첫 페이지(표지)
 		coverPath := filepath.Join(dir, "card_page_1.png")
 		f, err := os.Open(coverPath)
 		if err == nil {
 			files = append(files, &discordgo.File{
-				Name:        fmt.Sprintf("cover_var_%d.png", v+1),
+				Name:        fmt.Sprintf("cover_var_%d_%d.png", v+1, nowTs),
 				ContentType: "image/png",
 				Reader:      f,
 			})
@@ -535,12 +546,13 @@ func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, i
 	}
 
 	var files []*discordgo.File
+	nowTs := time.Now().Unix()
 	for v, dir := range res.OutputDirs {
 		coverPath := filepath.Join(dir, "card_page_1.png")
 		f, err := os.Open(coverPath)
 		if err == nil {
 			files = append(files, &discordgo.File{
-				Name:        fmt.Sprintf("cover_var_%d.png", v+1),
+				Name:        fmt.Sprintf("cover_var_%d_%d.png", v+1, nowTs),
 				ContentType: "image/png",
 				Reader:      f,
 			})
@@ -592,41 +604,99 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	cached, hasCache := b.Cache[resultID]
 	b.mu.Unlock()
 
+	// 디버그 용도의 로그 기록
+	log.Printf("[DEBUG] 메시지 수신: 채널=%s, 작성자=%s (%s), 내용=%q, 첨부파일수=%d, 대기여부=%v, 캐시보유=%v",
+		m.ChannelID, m.Author.Username, m.Author.ID, m.Content, len(m.Attachments), waiting, hasCache)
+
 	if waiting && hasCache {
 		if len(m.Attachments) > 0 {
 			att := m.Attachments[0]
-			if strings.HasPrefix(att.ContentType, "image/") {
-				s.ChannelMessageSend(m.ChannelID, "이미지를 다운로드하여 카드를 생성 중입니다...")
+			
+			// ContentType 검사 외에도 파일 확장자로 이미지 판단 여부 보강
+			contentType := strings.ToLower(att.ContentType)
+			isImage := strings.HasPrefix(contentType, "image/")
+			if !isImage {
+				ext := strings.ToLower(filepath.Ext(att.Filename))
+				if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
+					isImage = true
+				}
+			}
+
+			if isImage {
+				_, sendErr := s.ChannelMessageSend(m.ChannelID, "이미지를 다운로드하여 카드를 생성 중입니다...")
+				if sendErr != nil {
+					log.Printf("[ERROR] 진행 상황 메시지 발송 실패: %v", sendErr)
+				}
 				
-				// Clean up wait state
+				// 대기열 상태 정리
 				b.mu.Lock()
 				delete(b.WaitUpload, m.Author.ID)
 				b.mu.Unlock()
 
 				go func() {
-					// Create a new custom output dir
+					// 새로운 커스텀 출력 디렉토리 생성
 					outBase := filepath.Join("output", fmt.Sprintf("discord_custom_%d", time.Now().Unix()))
-					os.MkdirAll(outBase, 0755)
+					if err := os.MkdirAll(outBase, 0755); err != nil {
+						log.Printf("[ERROR] 커스텀 출력 폴더 생성 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 폴더 생성 중 오류가 발생했습니다.")
+						return
+					}
 					
 					customBgPath := filepath.Join(outBase, "custom_bg.jpg")
-					req, _ := http.NewRequestWithContext(b.Ctx, "GET", att.URL, nil)
-					resp, err := http.DefaultClient.Do(req)
-					if err == nil {
-						defer resp.Body.Close()
-						out, _ := os.Create(customBgPath)
-						io.Copy(out, resp.Body)
-						out.Close()
+					req, err := http.NewRequestWithContext(b.Ctx, "GET", att.URL, nil)
+					if err != nil {
+						log.Printf("[ERROR] 다운로드 요청 생성 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 이미지 요청 생성 중 오류가 발생했습니다.")
+						return
 					}
+					
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						log.Printf("[ERROR] 이미지 파일 다운로드 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 이미지를 다운로드하지 못했습니다.")
+						return
+					}
+					defer resp.Body.Close()
+
+					if resp.StatusCode != http.StatusOK {
+						log.Printf("[ERROR] 이미지 다운로드 HTTP 에러: %d", resp.StatusCode)
+						s.ChannelMessageSend(m.ChannelID, "❌ 이미지를 다운로드하지 못했습니다 (서버 HTTP 에러).")
+						return
+					}
+					
+					out, err := os.Create(customBgPath)
+					if err != nil {
+						log.Printf("[ERROR] 다운로드할 빈 파일 생성 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 이미지 파일 생성 중 오류가 발생했습니다.")
+						return
+					}
+					
+					if _, err := io.Copy(out, resp.Body); err != nil {
+						out.Close()
+						log.Printf("[ERROR] 이미지 파일 작성 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 이미지를 디스크에 쓰는 도중 실패했습니다.")
+						return
+					}
+					out.Close()
 
 					outDir := filepath.Join(outBase, "variation_custom")
 					
-					renderer.RenderCards(b.Ctx, cached.Result.Cards, outDir, customBgPath)
+					err = renderer.RenderCards(b.Ctx, cached.Result.Cards, outDir, customBgPath)
+					if err != nil {
+						log.Printf("[ERROR] 카드뉴스 렌더링 실패: %v", err)
+						s.ChannelMessageSend(m.ChannelID, "❌ 카드뉴스 렌더링 중 오류가 발생했습니다: "+err.Error())
+						return
+					}
 
-					// Update Result to only have this one custom variation
+					// 커스텀 variation 한 개만 결과 목록에 반영
 					cached.Result.OutputDirs = []string{outDir}
 					b.sendUpdatedCards(m.ChannelID, cached.Result, nil)
 				}()
+			} else {
+				log.Printf("[WARNING] 대기 상태에서 이미지가 아닌 파일(%s, ContentType: %s)이 전송되었습니다.", att.Filename, att.ContentType)
 			}
+		} else {
+			log.Printf("[WARNING] 대기 상태에서 첨부파일이 없는 메시지가 왔습니다: %q", m.Content)
 		}
 	}
 }

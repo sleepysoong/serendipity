@@ -10,5 +10,5 @@ output/
 
 # OS
 .DS_Store
-bot
+/bot
 config.yml
