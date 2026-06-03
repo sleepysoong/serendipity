@@ -50,6 +50,7 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.Identify.Intents |= discordgo.IntentMessageContent
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -263,11 +264,15 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 			targetChannel = channelID // fallback to current channel if no news channel is set
 		}
 		
-		// Discord limits messages to 2000 chars.
-		if len(msg) > 1990 {
-			msg = msg[:1980] + "\n```" // Truncate and close markdown block safely
+		// Discord limits messages to 2000 chars. Safely truncate using runes to avoid breaking UTF-8
+		runes := []rune(msg)
+		if len(runes) > 1990 {
+			msg = string(runes[:1980]) + "\n```" // Truncate and close markdown block safely
 		}
-		b.Session.ChannelMessageSend(targetChannel, msg)
+		_, err := b.Session.ChannelMessageSend(targetChannel, msg)
+		if err != nil {
+			log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
+		}
 	}
 	
 	res, err := pipeline.Run(b.Ctx, b.Config, topic, outDir, topic == "", logFunc)
