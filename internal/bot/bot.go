@@ -338,10 +338,12 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 
 func (b *Bot) sendOrEdit(channelID, content string, files []*discordgo.File, interaction *discordgo.Interaction, components ...discordgo.MessageComponent) {
 	if interaction != nil {
+		emptyAttachments := make([]*discordgo.MessageAttachment, 0)
 		_, err := b.Session.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
-			Content:    &content,
-			Files:      files,
-			Components: &components,
+			Content:     &content,
+			Files:       files,
+			Components:  &components,
+			Attachments: &emptyAttachments,
 		})
 		if err != nil {
 			log.Printf("Interaction Edit 실패: %v", err)
@@ -480,9 +482,22 @@ func (b *Bot) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCr
 				for v, dir := range cached.Result.OutputDirs {
 					bgPath := ""
 					if v < len(cached.Result.BgImageURLs) && cached.Result.BgImageURLs[v] != "" {
-						bgPath = filepath.Join(dir, "..", fmt.Sprintf("bg_%d.jpg", v+1))
+						// Ensure we use the absolute or cleanly resolved path
+						bgPath = filepath.Clean(filepath.Join(dir, "..", fmt.Sprintf("bg_%d.jpg", v+1)))
 					}
-					renderer.RenderCards(b.Ctx, cached.Result.Cards, dir, bgPath)
+					
+					// If bg path doesn't exist, ignore and use default to prevent silent failure
+					if bgPath != "" {
+						if _, statErr := os.Stat(bgPath); os.IsNotExist(statErr) {
+							log.Printf("배경 이미지 없음 (기본 배경 사용): %s", bgPath)
+							bgPath = ""
+						}
+					}
+					
+					err := renderer.RenderCards(b.Ctx, cached.Result.Cards, dir, bgPath)
+					if err != nil {
+						log.Printf("변형 %d 렌더링 실패: %v", v+1, err)
+					}
 				}
 				
 				// Send updated message
