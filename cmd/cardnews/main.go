@@ -22,20 +22,31 @@ func main() {
 	defer stop()
 
 	// 2. Parse command-line flags
-	queryFlag := flag.String("query", "한국은행 기준금리 동결", "컨텍스트 데이터를 수집하기 위한 검색 쿼리")
+	queryFlag := flag.String("query", "", "특정 주제로 카드뉴스를 생성할 경우의 검색 쿼리 (비어있으면 자동 주제 선정 모드)")
+	autoFlag := flag.Bool("auto", true, "자동으로 오늘의 뉴스 주제를 선정할지 여부")
 	manifestFlag := flag.String("manifest", "manifest.json", "Figma 노드 매핑 매니페스트 JSON 파일 경로")
 	outputDirFlag := flag.String("output", "output", "내보낸 카드뉴스 PNG를 저장할 로컬 디렉토리")
 	topNFlag := flag.Int("topn", 3, "수집할 Brave Search 검색 결과 개수")
 	flag.Parse()
 
+	// queryFlag가 직접 입력되었으면 자동으로 autoFlag는 false로 취급하여 수동 입력 쿼리를 우선합니다.
+	autoSelect := *autoFlag
+	if *queryFlag != "" {
+		autoSelect = false
+	}
+
 	log.Printf("자동화된 카드뉴스 생성 파이프라인을 시작합니다...")
-	log.Printf("검색 쿼리: %s", *queryFlag)
+	if autoSelect {
+		log.Printf("모드: 자동 뉴스거리 선정 모드 (Search + LLM)")
+	} else {
+		log.Printf("모드: 수동 검색 쿼리 모드 (%q)", *queryFlag)
+	}
 	log.Printf("매니페스트: %s", *manifestFlag)
 	log.Printf("출력 디렉토리: %s", *outputDirFlag)
 	log.Printf("상위 N개 결과: %d", *topNFlag)
 
 	// Execute pipeline and print structured error messages if any phase fails
-	if err := runPipeline(ctx, *queryFlag, *manifestFlag, *outputDirFlag, *topNFlag); err != nil {
+	if err := runPipeline(ctx, *queryFlag, *manifestFlag, *outputDirFlag, *topNFlag, autoSelect); err != nil {
 		log.Printf("[치명적 오류] 파이프라인 실행 실패: %v", err)
 		os.Exit(1)
 	}
@@ -43,7 +54,8 @@ func main() {
 	log.Printf("파이프라인이 성공적으로 완료되었습니다!")
 }
 
-func runPipeline(ctx context.Context, query, manifestPath, outputDir string, topN int) error {
+// runPipeline orchestrates pipeline phases:
+func runPipeline(ctx context.Context, query, manifestPath, outputDir string, topN int, autoSelect bool) error {
 	// Step 1: Environment and configuration loading
 	log.Println("[1/6] 설정 및 매핑 매니페스트를 불러오는 중...")
 	cfg, err := config.LoadConfig(ctx, manifestPath)
@@ -52,9 +64,30 @@ func runPipeline(ctx context.Context, query, manifestPath, outputDir string, top
 	}
 	log.Println("설정이 성공적으로 로드되었습니다.")
 
+	selectedTopic := query
+
+	// 1.5단계: 자동 뉴스거리 선정
+	if autoSelect {
+		log.Println("[1.5/6] 최신 이슈 검색 및 자동 카드뉴스 주제 선정 중...")
+		trendingQuery := "오늘의 주요 뉴스 시사 핫이슈"
+		log.Printf("인기 시사 이슈 검색 중 (%q)...", trendingQuery)
+		trendingContext, err := search.Search(ctx, cfg.BraveAPIKey, trendingQuery, 5)
+		if err != nil {
+			return fmt.Errorf("자동 주제 선정을 위한 검색 실패: %w", err)
+		}
+
+		log.Println("최신 뉴스 분석 및 적합한 주제 선정을 위한 LLM 가동 중...")
+		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, trendingContext)
+		if err != nil {
+			return fmt.Errorf("자동 카드뉴스 주제 선정 실패: %w", err)
+		}
+		log.Printf("선정된 카드뉴스 주제: %q", topic)
+		selectedTopic = topic
+	}
+
 	// Step 2: Data collection from Brave Search
-	log.Printf("[2/6] %q에 대한 컨텍스트 수집을 위해 Brave Search를 쿼리하는 중...", query)
-	groundingContext, err := search.Search(ctx, cfg.BraveAPIKey, query, topN)
+	log.Printf("[2/6] %q에 대한 세부 컨텍스트 수집을 위해 Brave Search를 쿼리하는 중...", selectedTopic)
+	groundingContext, err := search.Search(ctx, cfg.BraveAPIKey, selectedTopic, topN)
 	if err != nil {
 		return fmt.Errorf("데이터 수집 단계 실패: %w", err)
 	}

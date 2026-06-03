@@ -51,6 +51,112 @@ func SanitizeJSON(raw string) string {
 	return raw
 }
 
+// SelectTopic analyzes trending news context and selects the single best topic for card news.
+func SelectTopic(ctx context.Context, apiKey, trendingContext string) (string, error) {
+	model := "google/gemma-4-31b-it:free"
+
+	systemPrompt := `당신은 트렌디한 뉴스 편집장입니다. 제공된 최신 뉴스 검색 결과(컨텍스트)를 분석하여, 대중에게 가장 유용하고 흥미로운 단 하나의 카드뉴스 주제를 선정해야 합니다.
+
+반드시 다음 규칙을 준수해야 합니다:
+1. 피그마 검색이나 Brave Search에 재입력하기 적합한 '핵심 검색어 키워드' 또는 '구체적인 주제 명사구' 형태로 작성하십시오.
+2. 마크다운 코드 블록, 따옴표, 번호 매기기, 특수 문자 및 설명(예: "주제는 ~ 입니다" 등)을 절대로 포함하지 말고, 단 한 줄의 핵심 문구만 출력하십시오.
+
+출력 예시:
+한국은행 기준금리 동결 배경
+누리호 4차 발사 성공 및 향후 계획
+글로벌 AI 반도체 수출 실적 개선 동향`
+
+	userPrompt := fmt.Sprintf("다음 최신 뉴스 목록을 보고, 카드뉴스로 만들기에 가장 적합하고 흥미진진한 하나의 핵심 주제 키워드를 한 줄로 뽑아주세요.\n\n최신 뉴스 목록:\n%s", trendingContext)
+
+	messages := []Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	var topic string
+	var lastErr error
+	baseDelay := 1 * time.Second
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		topic, lastErr = callOpenRouterForTopic(ctx, apiKey, model, messages)
+		if lastErr == nil {
+			return topic, nil
+		}
+
+		if attempt < 3 {
+			delay := baseDelay * time.Duration(1<<(attempt-1))
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("주제 선정 재시도 대기 중 컨텍스트가 취소되었습니다: %w", ctx.Err())
+			case <-time.After(delay):
+			}
+		}
+	}
+
+	return "", fmt.Errorf("3회 시도 후 카드뉴스 주제 선정에 실패했습니다: %w", lastErr)
+}
+
+func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages []Message) (string, error) {
+	reqBody := ChatCompletionRequest{
+		Model:       model,
+		Messages:    messages,
+		Temperature: 0.3,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter 요청 직렬화 실패: %w", err)
+	}
+
+	apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(apiCtx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter HTTP 요청 생성 실패: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://github.com/sleepysoong/serendipity")
+	req.Header.Set("X-Title", "Serendipity Cardnews Autopipeline")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter API 호출 실패: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("OpenRouter가 상태 코드 %d를 반환했습니다. 응답: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter 응답 읽기 실패: %w", err)
+	}
+
+	var chatResponse ChatCompletionResponse
+	if err := json.Unmarshal(bodyBytes, &chatResponse); err != nil {
+		return "", fmt.Errorf("OpenRouter 응답 JSON 파싱 실패: %w", err)
+	}
+
+	if len(chatResponse.Choices) == 0 {
+		return "", fmt.Errorf("OpenRouter 응답에 완성 결과(Choices)가 없습니다")
+	}
+
+	rawContent := chatResponse.Choices[0].Message.Content
+	topic := strings.TrimSpace(rawContent)
+	topic = strings.Trim(topic, "`'\" \n\r\t")
+	if topic == "" {
+		return "", fmt.Errorf("추출된 주제명이 비어있습니다")
+	}
+
+	return topic, nil
+}
+
 // GenerateCardNews orchestrates the OpenRouter request and handles response parsing with retries and exponential backoff.
 func GenerateCardNews(ctx context.Context, apiKey, groundingContext string) ([]CardContent, error) {
 	model := "google/gemma-4-31b-it:free"
