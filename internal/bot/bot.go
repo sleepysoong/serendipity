@@ -477,11 +477,7 @@ func (b *Bot) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCr
 		body := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "텍스트를 적용하여 렌더링 중입니다...",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
 		})
 
 		go func() {
@@ -503,13 +499,13 @@ func (b *Bot) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCr
 				}
 				
 				// Send updated message
-				b.sendUpdatedCards(i.ChannelID, cached.Result)
+				b.sendUpdatedCards(i.ChannelID, cached.Result, i.Interaction)
 			}
 		}()
 	}
 }
 
-func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult) {
+func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, interaction *discordgo.Interaction) {
 	var bodyText strings.Builder
 	bodyText.WriteString(fmt.Sprintf("# %s\n\n", res.Topic))
 	for _, card := range res.Cards {
@@ -556,7 +552,7 @@ func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult) {
 		msgContent = msgContent[:1990] + "..."
 	}
 
-	b.sendOrEdit(channelID, msgContent, files, nil, components...)
+	b.sendOrEdit(channelID, msgContent, files, interaction, components...)
 }
 
 func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -601,7 +597,7 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 					// Update Result to only have this one custom variation
 					cached.Result.OutputDirs = []string{outDir}
-					b.sendUpdatedCards(m.ChannelID, cached.Result)
+					b.sendUpdatedCards(m.ChannelID, cached.Result, nil)
 				}()
 			}
 		}
