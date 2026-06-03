@@ -27,6 +27,21 @@ type SearchResponse struct {
 	Web WebSection `json:"web"`
 }
 
+// ImageResult represents a single image search result.
+type ImageResult struct {
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	Source     string `json:"source"`
+	Properties struct {
+		URL string `json:"url"`
+	} `json:"properties"`
+}
+
+// ImageSearchResponse represents the Brave Search Image API response payload.
+type ImageSearchResponse struct {
+	Results []ImageResult `json:"results"`
+}
+
 // Search queries Brave Search API for a query string, extracts top N results,
 // and merges their titles and descriptions into a single logical text block for grounding.
 func Search(ctx context.Context, apiKey, query string, topN int) (string, error) {
@@ -99,4 +114,80 @@ func Search(ctx context.Context, apiKey, query string, topN int) (string, error)
 
 	mergedResult := strings.Join(textBlock, "\n\n")
 	return mergedResult, nil
+}
+
+// SearchImages queries Brave Search Image API for a query string and extracts top N image URLs.
+func SearchImages(ctx context.Context, apiKey, query string, topN int) ([]string, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("Brave API 키가 비어있습니다")
+	}
+	if query == "" {
+		return nil, fmt.Errorf("검색 쿼리가 비어있습니다")
+	}
+	if topN <= 0 {
+		topN = 3 // default to top 3 results
+	}
+
+	searchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	endpoint := "https://api.search.brave.com/res/v1/images/search"
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("Brave Image Search API URL 파싱 실패: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("q", query)
+	q.Set("search_lang", "ko")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(searchCtx, "GET", u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("이미지 검색 HTTP 요청 생성 실패: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Subscription-Token", apiKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Brave Image Search 요청 실패: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Brave Image Search가 200이 아닌 상태 코드를 반환했습니다: %d, 응답: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Brave Image Search 응답 바디를 읽지 못했습니다: %w", err)
+	}
+
+	var searchResponse ImageSearchResponse
+	if err := json.Unmarshal(bodyBytes, &searchResponse); err != nil {
+		return nil, fmt.Errorf("Brave Image Search 응답 파싱 실패: %w", err)
+	}
+
+	var urls []string
+	resultsCount := len(searchResponse.Results)
+	limit := topN
+	if resultsCount < limit {
+		limit = resultsCount
+	}
+
+	for i := 0; i < limit; i++ {
+		// Try Properties.URL first, fallback to Source or URL depending on what brave provides.
+		// Usually properties.url is the actual image.
+		url := searchResponse.Results[i].Properties.URL
+		if url == "" {
+			url = searchResponse.Results[i].Source
+		}
+		urls = append(urls, url)
+	}
+
+	return urls, nil
 }
