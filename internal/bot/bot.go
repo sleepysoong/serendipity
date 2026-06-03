@@ -284,12 +284,30 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 				chunk = chunk + "\n```"
 			}
 			
-			_, err := b.Session.ChannelMessageSend(targetChannel, chunk)
+			var err error
+			// 상호작용(슬래시 명령)이 존재하고 로그 타겟 채널이 명령이 내려진 채널과 동일한 경우,
+			// 채널 메시지 전송 권한(403 Missing Access 등) 문제를 우회하기 위해 Interaction Followup을 우선 사용합니다.
+			if interaction != nil && targetChannel == channelID {
+				_, err = b.Session.FollowupMessageCreate(interaction, true, &discordgo.WebhookParams{
+					Content: chunk,
+				})
+			} else {
+				_, err = b.Session.ChannelMessageSend(targetChannel, chunk)
+			}
+			
 			if err != nil {
 				log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
-				// 권한(403 등)이나 설정 문제로 전송에 실패할 시, 현재 명령이 실행된 채널로 최후의 폴백 전송을 시도합니다.
-				if targetChannel != channelID && channelID != "" {
-					log.Printf("현재 채널(%s)로 로그 전송 재시도...", channelID)
+				// 만약 실패했고 interaction이 존재한다면 최후의 수단으로 interaction followup을 통해 보냅니다.
+				if interaction != nil {
+					log.Printf("Interaction Followup을 통해 로그 전송 폴백 시도...")
+					_, fallbackErr := b.Session.FollowupMessageCreate(interaction, true, &discordgo.WebhookParams{
+						Content: "[로그 폴백] " + chunk,
+					})
+					if fallbackErr != nil {
+						log.Printf("Interaction Followup 폴백도 실패: %v", fallbackErr)
+					}
+				} else if targetChannel != channelID && channelID != "" {
+					log.Printf("현재 채널(%s)로 로그 전송 폴백 시도...", channelID)
 					_, fallbackErr := b.Session.ChannelMessageSend(channelID, "[로그 폴백] "+chunk)
 					if fallbackErr != nil {
 						log.Printf("현재 채널(%s)로의 로그 폴백 전송도 실패: %v", channelID, fallbackErr)
@@ -359,7 +377,13 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 		},
 	}
 
-	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 3개 중 하나를 선택해 주세요)", res.Topic, bodyText.String())
+	warningMsg := ""
+	perms, permErr := b.Session.UserChannelPermissions(b.Session.State.User.ID, channelID)
+	if permErr != nil || (perms&discordgo.PermissionViewChannel) == 0 || (perms&discordgo.PermissionSendMessages) == 0 {
+		warningMsg = "\n\n⚠️ **[권한 경고] 봇의 채널 권한 설정이 필요합니다!**\n현재 봇에게 이 채널의 **'채널 보기(View Channel)'** 및 **'메시지 보내기(Send Messages)'** 권한이 부여되지 않았습니다.\n이 권한이 없으면 **로그 전송** 및 **이미지 직접 업로드** 기능이 작동할 수 없습니다. 서버 설정에서 봇에게 해당 권한을 꼭 부여해 주세요!"
+	}
+
+	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 3개 중 하나를 선택해 주세요)%s", res.Topic, bodyText.String(), warningMsg)
 	if len(msgContent) > 2000 {
 		msgContent = msgContent[:1990] + "..." // Discord limit
 	}
@@ -586,7 +610,13 @@ func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, i
 		},
 	}
 
-	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 중 하나를 선택해 주세요)", res.Topic, bodyText.String())
+	warningMsg := ""
+	perms, permErr := b.Session.UserChannelPermissions(b.Session.State.User.ID, channelID)
+	if permErr != nil || (perms&discordgo.PermissionViewChannel) == 0 || (perms&discordgo.PermissionSendMessages) == 0 {
+		warningMsg = "\n\n⚠️ **[권한 경고] 봇의 채널 권한 설정이 필요합니다!**\n현재 봇에게 이 채널의 **'채널 보기(View Channel)'** 및 **'메시지 보내기(Send Messages)'** 권한이 부여되지 않았습니다.\n이 권한이 없으면 **로그 전송** 및 **이미지 직접 업로드** 기능이 작동할 수 없습니다. 서버 설정에서 봇에게 해당 권한을 꼭 부여해 주세요!"
+	}
+
+	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 중 하나를 선택해 주세요)%s", res.Topic, bodyText.String(), warningMsg)
 	if len(msgContent) > 2000 {
 		msgContent = msgContent[:1990] + "..."
 	}
