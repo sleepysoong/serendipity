@@ -70,6 +70,30 @@ go run cmd/cardnews/main.go -output output -topn 3
 go run cmd/cardnews/main.go -query "한국은행 기준금리 동결" -output output -topn 3
 ```
 
+### 3.3 로컬 목업(Mock) 서버 테스트 모드
+실제 피그마 계정이 없거나 오프라인 환경인 경우, 로컬 목업 서버를 띄워 전체 파이프라인의 갱신/동기화/다운로드 흐름을 검증할 수 있습니다.
+
+1. **Figma 목업 서버 구동** (터미널 1)
+```bash
+go run cmd/mock_figma/main.go
+```
+
+2. **환경변수 임시 등록** (터미널 2)
+```bash
+# Brave Search와 OpenRouter LLM의 실제 API 키는 필요합니다. (피그마 PAT/File은 가짜값 가능)
+export BRAVE_API_KEY="your_real_brave_api_key"
+export OPENROUTER_API_KEY="your_real_openrouter_api_key"
+export FIGMA_PAT="mock-pat"
+export FIGMA_FILE_KEY="mock-file-key"
+export FIGMA_MCP_ENDPOINT="http://localhost:8080/sse"
+```
+
+3. **파이프라인 작동** (터미널 2)
+```bash
+go run cmd/cardnews/main.go -output local_output
+```
+* 파이프라인이 종료되면 `local_output` 디렉토리에 모사된 투명 PNG 카드뉴스 파일들(`card_page_1.png` 등)이 성공적으로 생성되는 것을 확인할 수 있습니다.
+
 ---
 
 ## 4. 테스트 실행
