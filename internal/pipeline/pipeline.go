@@ -24,19 +24,22 @@ type PipelineResult struct {
 }
 
 // Run executes the cardnews generation pipeline.
-func Run(ctx context.Context, cfg *config.Config, query, outputBaseDir string, autoSelect bool) (*PipelineResult, error) {
+func Run(ctx context.Context, cfg *config.Config, query, outputBaseDir string, autoSelect bool, logf func(string)) (*PipelineResult, error) {
 	log.Println("[1/5] 뉴스거리 탐색 및 선정...")
 	selectedTopic := query
 
 	if autoSelect || query == "" {
 		trendingQuery := "오늘의 주요 뉴스 시사 핫이슈"
 		log.Printf("인기 시사 이슈 검색 중 (%q)...", trendingQuery)
+		if logf != nil {
+			logf(fmt.Sprintf("● **`서칭을 시작합니다`**  |  `%s`", trendingQuery))
+		}
 		trendingContext, err := search.Search(ctx, cfg.BraveAPIKey, trendingQuery, 5)
 		if err != nil {
 			return nil, fmt.Errorf("자동 주제 선정을 위한 검색 실패: %w", err)
 		}
 
-		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, trendingContext)
+		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, trendingContext, logf)
 		if err != nil {
 			return nil, fmt.Errorf("자동 카드뉴스 주제 선정 실패: %w", err)
 		}
@@ -45,13 +48,16 @@ func Run(ctx context.Context, cfg *config.Config, query, outputBaseDir string, a
 	}
 
 	log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
+	if logf != nil {
+		logf(fmt.Sprintf("● **`서칭을 시작합니다`**  |  `%s`", selectedTopic))
+	}
 	groundingContext, err := search.Search(ctx, cfg.BraveAPIKey, selectedTopic, 3)
 	if err != nil {
 		return nil, fmt.Errorf("데이터 수집 실패: %w", err)
 	}
 
 	log.Printf("[3/5] 카드 콘텐츠 생성...")
-	cards, err := llm.GenerateCardNews(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, groundingContext)
+	cards, err := llm.GenerateCardNews(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, groundingContext, logf)
 	if err != nil {
 		return nil, fmt.Errorf("카드 콘텐츠 생성 실패: %w", err)
 	}

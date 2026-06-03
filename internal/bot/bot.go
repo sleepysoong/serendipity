@@ -92,13 +92,11 @@ func (b *Bot) Start() error {
 					Description: "OpenRouter API Key",
 					Required:    false,
 				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "news_channel",
-					Description: "자동 생성된 뉴스를 받을 채널 ID",
-					Required:    false,
-				},
 			},
+		},
+		{
+			Name:        "뉴스채널",
+			Description: "스케줄된 자동 뉴스를 받을 채널을 현재 채널로 지정합니다.",
 		},
 	}
 
@@ -149,7 +147,29 @@ func (b *Bot) handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionC
 		b.handleNewsCreate(s, i)
 	case "세팅":
 		b.handleSetting(s, i)
+	case "뉴스채널":
+		b.handleNewsChannel(s, i)
 	}
+}
+
+func (b *Bot) handleNewsChannel(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	err := config.UpdateConfig(b.Ctx, func(cfg *config.Config) {
+		b.mu.Lock()
+		b.NewsChannelID = i.ChannelID
+		b.mu.Unlock()
+	})
+
+	resp := "이 채널이 자동 뉴스 채널로 지정되었습니다."
+	if err != nil {
+		resp = "설정 실패: " + err.Error()
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: resp,
+		},
+	})
 }
 
 func (b *Bot) handleSetting(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -166,11 +186,6 @@ func (b *Bot) handleSetting(s *discordgo.Session, i *discordgo.InteractionCreate
 			case "openrouter_api_key":
 				cfg.OpenRouterAPIKey = opt.StringValue()
 				msg = append(msg, "OpenRouter API Key 갱신됨")
-			case "news_channel":
-				b.mu.Lock()
-				b.NewsChannelID = opt.StringValue()
-				b.mu.Unlock()
-				msg = append(msg, "뉴스 알림 채널이 설정됨: "+opt.StringValue())
 			}
 		}
 	})
@@ -221,7 +236,11 @@ func (b *Bot) generateScheduledNews() {
 func (b *Bot) generateAndSend(channelID string, topic string, interaction *discordgo.Interaction) {
 	outDir := filepath.Join("output", fmt.Sprintf("discord_%d", time.Now().Unix()))
 	
-	res, err := pipeline.Run(b.Ctx, b.Config, topic, outDir, topic == "")
+	logFunc := func(msg string) {
+		b.Session.ChannelMessageSend(channelID, msg)
+	}
+	
+	res, err := pipeline.Run(b.Ctx, b.Config, topic, outDir, topic == "", logFunc)
 	
 	if err != nil {
 		msg := "뉴스 생성 중 오류가 발생했습니다: " + err.Error()

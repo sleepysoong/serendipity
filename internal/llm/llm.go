@@ -52,7 +52,7 @@ func SanitizeJSON(raw string) string {
 }
 
 // SelectTopic analyzes trending news context and selects the single best topic for card news.
-func SelectTopic(ctx context.Context, apiKey, model, trendingContext string) (string, error) {
+func SelectTopic(ctx context.Context, apiKey, model, trendingContext string, logf func(string)) (string, error) {
 
 	systemPrompt := `당신은 트렌디한 뉴스 편집장입니다. 제공된 최신 뉴스 검색 결과(컨텍스트)를 분석하여, 대중에게 가장 유용하고 흥미로운 단 하나의 카드뉴스 주제를 선정해야 합니다.
 
@@ -77,7 +77,10 @@ func SelectTopic(ctx context.Context, apiKey, model, trendingContext string) (st
 	baseDelay := 1 * time.Second
 
 	for attempt := 1; attempt <= 3; attempt++ {
-		topic, lastErr = callOpenRouterForTopic(ctx, apiKey, model, messages)
+		if logf != nil {
+			logf(fmt.Sprintf("● **`인공지능 응답을 요청합니다`**  |  ```\n%s\n```", userPrompt))
+		}
+		topic, lastErr = callOpenRouterForTopic(ctx, apiKey, model, messages, logf)
 		if lastErr == nil {
 			return topic, nil
 		}
@@ -95,7 +98,7 @@ func SelectTopic(ctx context.Context, apiKey, model, trendingContext string) (st
 	return "", fmt.Errorf("3회 시도 후 카드뉴스 주제 선정에 실패했습니다: %w", lastErr)
 }
 
-func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages []Message) (string, error) {
+func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages []Message, logf func(string)) (string, error) {
 	reqBody := ChatCompletionRequest{
 		Model:       model,
 		Messages:    messages,
@@ -147,6 +150,11 @@ func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages 
 	}
 
 	rawContent := chatResponse.Choices[0].Message.Content
+	
+	if logf != nil {
+		logf(fmt.Sprintf("● **`인공지능 응답을 받았습니다`**  |  ```\n%s\n```", rawContent))
+	}
+	
 	topic := strings.TrimSpace(rawContent)
 	topic = strings.Trim(topic, "`'\" \n\r\t")
 	if topic == "" {
@@ -157,7 +165,7 @@ func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages 
 }
 
 // GenerateCardNews orchestrates the OpenRouter request and handles response parsing with retries and exponential backoff.
-func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext string) ([]CardContent, error) {
+func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext string, logf func(string)) ([]CardContent, error) {
 
 	systemPrompt := `당신은 전문 콘텐츠 크리에이터입니다. 제공된 검색 컨텍스트에서 주요 뉴스 포인트를 추출하여 순차적인 카드뉴스 슬라이드로 포맷팅하는 것이 당신의 임무입니다.
 
@@ -220,7 +228,10 @@ func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext strin
 
 	// Run up to 3 attempts with exponential backoff if error occurs in API call or JSON parsing
 	for attempt := 1; attempt <= 3; attempt++ {
-		cards, lastErr = callOpenRouterAndParse(ctx, apiKey, model, messages)
+		if logf != nil {
+			logf(fmt.Sprintf("● **`인공지능 응답을 요청합니다`**  |  ```\n%s\n```", userPrompt))
+		}
+		cards, lastErr = callOpenRouterAndParse(ctx, apiKey, model, messages, logf)
 		if lastErr == nil {
 			return cards, nil
 		}
@@ -238,7 +249,7 @@ func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext strin
 	return nil, fmt.Errorf("3회 시도 후 카드뉴스 생성 및 파싱에 실패했습니다: %w", lastErr)
 }
 
-func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages []Message) ([]CardContent, error) {
+func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages []Message, logf func(string)) ([]CardContent, error) {
 	reqBody := ChatCompletionRequest{
 		Model:       model,
 		Messages:    messages,
@@ -291,6 +302,10 @@ func callOpenRouterAndParse(ctx context.Context, apiKey, model string, messages 
 	}
 
 	rawContent := chatResponse.Choices[0].Message.Content
+	if logf != nil {
+		logf(fmt.Sprintf("● **`인공지능 응답을 받았습니다`**  |  ```\n%s\n```", rawContent))
+	}
+	
 	sanitized := SanitizeJSON(rawContent)
 
 	var cards []CardContent
