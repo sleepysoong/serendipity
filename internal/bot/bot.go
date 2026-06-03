@@ -3,7 +3,9 @@ package bot
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +17,13 @@ import (
 	
 	"serendipity/internal/config"
 	"serendipity/internal/pipeline"
+	"serendipity/internal/renderer"
 )
+
+type CachedResult struct {
+	Result *pipeline.PipelineResult
+	Topic  string
+}
 
 type Bot struct {
 	Session *discordgo.Session
@@ -26,6 +34,9 @@ type Bot struct {
 	
 	// channel ID for scheduled news
 	NewsChannelID string 
+	
+	Cache      map[string]CachedResult
+	WaitUpload map[string]string // "userID" -> resultID
 	
 	mu sync.Mutex
 }
@@ -43,15 +54,18 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	b := &Bot{
-		Session: s,
-		Config:  cfg,
-		Cron:    cron.New(),
-		Ctx:     ctx,
-		Cancel:  cancel,
+		Session:    s,
+		Config:     cfg,
+		Cron:       cron.New(),
+		Ctx:        ctx,
+		Cancel:     cancel,
+		Cache:      make(map[string]CachedResult),
+		WaitUpload: make(map[string]string),
 	}
 
 	s.AddHandler(b.onReady)
 	s.AddHandler(b.onInteractionCreate)
+	s.AddHandler(b.onMessageCreate)
 
 	return b, nil
 }
@@ -136,6 +150,8 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 		b.handleSlashCommand(s, i)
 	case discordgo.InteractionMessageComponent:
 		b.handleComponent(s, i)
+	case discordgo.InteractionModalSubmit:
+		b.handleModalSubmit(s, i)
 	}
 }
 
@@ -270,19 +286,24 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 		}
 	}
 
-	// 컴포넌트 추가 (이미지 변경, 타이틀 변경 버튼)
+	b.mu.Lock()
+	resultID := fmt.Sprintf("%d", time.Now().UnixNano())
+	b.Cache[resultID] = CachedResult{Result: res, Topic: res.Topic}
+	b.mu.Unlock()
+
+	// 컴포넌트 추가 (텍스트 변경, 이미지 변경 버튼)
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					Label:    "다른 이미지로 재생성",
-					Style:    discordgo.PrimaryButton,
-					CustomID: "regen_image:" + res.Topic,
+					Label:    "텍스트 변경",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "text_edit:" + resultID,
 				},
 				discordgo.Button{
-					Label:    "타이틀 재생성",
-					Style:    discordgo.SecondaryButton,
-					CustomID: "regen_title:" + res.Topic,
+					Label:    "이미지 변경",
+					Style:    discordgo.PrimaryButton,
+					CustomID: "img_menu:" + resultID,
 				},
 			},
 		},
@@ -320,21 +341,269 @@ func (b *Bot) sendOrEdit(channelID, content string, files []*discordgo.File, int
 
 func (b *Bot) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	id := i.MessageComponentData().CustomID
-	
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: "요청을 처리중입니다...",
-			Flags:   discordgo.MessageFlagsEphemeral,
+
+	if strings.HasPrefix(id, "text_edit:") {
+		resultID := strings.TrimPrefix(id, "text_edit:")
+		b.mu.Lock()
+		cached, ok := b.Cache[resultID]
+		b.mu.Unlock()
+		
+		if !ok || len(cached.Result.Cards) == 0 {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "캐시가 만료되었습니다. 새로 뉴스를 생성해주세요.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "text_modal:" + resultID,
+				Title:    "텍스트 변경",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID: "title_input",
+								Label:    "타이틀 (최대 15자)",
+								Style:    discordgo.TextInputShort,
+								Required: true,
+								Value:    cached.Result.Cards[0].Title,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID: "body_input",
+								Label:    "서브타이틀/본문 (최대 50자)",
+								Style:    discordgo.TextInputParagraph,
+								Required: true,
+								Value:    cached.Result.Cards[0].Body,
+							},
+						},
+					},
+				},
+			},
+		})
+		return
+	}
+
+	if strings.HasPrefix(id, "img_menu:") {
+		resultID := strings.TrimPrefix(id, "img_menu:")
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "이미지 변경 옵션을 선택하세요:",
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.Button{
+								Label:    "다른 이미지 찾기",
+								Style:    discordgo.PrimaryButton,
+								CustomID: "img_search:" + resultID,
+							},
+							discordgo.Button{
+								Label:    "이미지 업로드",
+								Style:    discordgo.SecondaryButton,
+								CustomID: "img_upload:" + resultID,
+							},
+						},
+					},
+				},
+			},
+		})
+		return
+	}
+
+	if strings.HasPrefix(id, "img_search:") {
+		resultID := strings.TrimPrefix(id, "img_search:")
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "새로운 이미지를 탐색하여 재생성합니다...",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		b.mu.Lock()
+		cached, ok := b.Cache[resultID]
+		b.mu.Unlock()
+		if ok {
+			// Trigger full pipeline again to get new images but this will also re-gen text.
+			// The user said "다른 이미지 찾기를 누르면 다시 이미지를 찾아줘. 또 3개 중에 고르게 해."
+			// We can just call pipeline.Run again with the same topic.
+			go b.generateAndSend(i.ChannelID, cached.Topic, nil)
+		}
+		return
+	}
+
+	if strings.HasPrefix(id, "img_upload:") {
+		resultID := strings.TrimPrefix(id, "img_upload:")
+		userID := ""
+		if i.Member != nil {
+			userID = i.Member.User.ID
+		} else if i.User != nil {
+			userID = i.User.ID
+		}
+
+		b.mu.Lock()
+		b.WaitUpload[userID] = resultID
+		b.mu.Unlock()
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ 이 채널에 사용하실 이미지를 파일 첨부하여 전송해주세요! (현재 텍스트 유지)",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+}
+
+func (b *Bot) handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	id := i.ModalSubmitData().CustomID
+	if strings.HasPrefix(id, "text_modal:") {
+		resultID := strings.TrimPrefix(id, "text_modal:")
+		
+		data := i.ModalSubmitData()
+		title := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		body := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "텍스트를 적용하여 렌더링 중입니다...",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		go func() {
+			b.mu.Lock()
+			cached, ok := b.Cache[resultID]
+			b.mu.Unlock()
+
+			if ok && len(cached.Result.Cards) > 0 {
+				cached.Result.Cards[0].Title = title
+				cached.Result.Cards[0].Body = body
+				
+				// Rerender the 3 variations locally
+				for v, dir := range cached.Result.OutputDirs {
+					bgPath := ""
+					if v < len(cached.Result.BgImageURLs) && cached.Result.BgImageURLs[v] != "" {
+						bgPath = filepath.Join(dir, "..", fmt.Sprintf("bg_%d.jpg", v+1))
+					}
+					renderer.RenderCards(b.Ctx, cached.Result.Cards, dir, bgPath)
+				}
+				
+				// Send updated message
+				b.sendUpdatedCards(i.ChannelID, cached.Result)
+			}
+		}()
+	}
+}
+
+func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult) {
+	var bodyText strings.Builder
+	bodyText.WriteString(fmt.Sprintf("# %s\n\n", res.Topic))
+	for _, card := range res.Cards {
+		bodyText.WriteString(fmt.Sprintf("**%s**\n%s\n\n", card.Title, card.Body))
+	}
+
+	var files []*discordgo.File
+	for v, dir := range res.OutputDirs {
+		coverPath := filepath.Join(dir, "card_page_1.png")
+		f, err := os.Open(coverPath)
+		if err == nil {
+			files = append(files, &discordgo.File{
+				Name:        fmt.Sprintf("cover_var_%d.png", v+1),
+				ContentType: "image/png",
+				Reader:      f,
+			})
+		}
+	}
+
+	b.mu.Lock()
+	resultID := fmt.Sprintf("%d", time.Now().UnixNano())
+	b.Cache[resultID] = CachedResult{Result: res, Topic: res.Topic}
+	b.mu.Unlock()
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "텍스트 변경",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "text_edit:" + resultID,
+				},
+				discordgo.Button{
+					Label:    "이미지 변경",
+					Style:    discordgo.PrimaryButton,
+					CustomID: "img_menu:" + resultID,
+				},
+			},
 		},
-	})
-	
-	if strings.HasPrefix(id, "regen_image:") {
-		topic := strings.TrimPrefix(id, "regen_image:")
-		// 새로운 변형만 생성하는 로직이 필요하지만 현재는 전체 재생성으로 단순화
-		go b.generateAndSend(i.ChannelID, topic, nil)
-	} else if strings.HasPrefix(id, "regen_title:") {
-		topic := strings.TrimPrefix(id, "regen_title:")
-		go b.generateAndSend(i.ChannelID, topic, nil)
+	}
+
+	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 중 하나를 선택해 주세요)", res.Topic, bodyText.String())
+	if len(msgContent) > 2000 {
+		msgContent = msgContent[:1990] + "..."
+	}
+
+	b.sendOrEdit(channelID, msgContent, files, nil, components...)
+}
+
+func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if m.Author.ID == s.State.User.ID {
+		return
+	}
+
+	b.mu.Lock()
+	resultID, waiting := b.WaitUpload[m.Author.ID]
+	cached, hasCache := b.Cache[resultID]
+	b.mu.Unlock()
+
+	if waiting && hasCache {
+		if len(m.Attachments) > 0 {
+			att := m.Attachments[0]
+			if strings.HasPrefix(att.ContentType, "image/") {
+				s.ChannelMessageSend(m.ChannelID, "이미지를 다운로드하여 카드를 생성 중입니다...")
+				
+				// Clean up wait state
+				b.mu.Lock()
+				delete(b.WaitUpload, m.Author.ID)
+				b.mu.Unlock()
+
+				go func() {
+					// Create a new custom output dir
+					outBase := filepath.Join("output", fmt.Sprintf("discord_custom_%d", time.Now().Unix()))
+					os.MkdirAll(outBase, 0755)
+					
+					customBgPath := filepath.Join(outBase, "custom_bg.jpg")
+					req, _ := http.NewRequestWithContext(b.Ctx, "GET", att.URL, nil)
+					resp, err := http.DefaultClient.Do(req)
+					if err == nil {
+						defer resp.Body.Close()
+						out, _ := os.Create(customBgPath)
+						io.Copy(out, resp.Body)
+						out.Close()
+					}
+
+					outDir := filepath.Join(outBase, "variation_custom")
+					
+					renderer.RenderCards(b.Ctx, cached.Result.Cards, outDir, customBgPath)
+
+					// Update Result to only have this one custom variation
+					cached.Result.OutputDirs = []string{outDir}
+					b.sendUpdatedCards(m.ChannelID, cached.Result)
+				}()
+			}
+		}
 	}
 }
