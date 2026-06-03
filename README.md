@@ -24,6 +24,9 @@ export BRAVE_API_KEY="your_brave_search_api_key"
 # OpenRouter API 키 (LLM 추론용)
 export OPENROUTER_API_KEY="your_openrouter_api_key"
 
+# 사용할 LLM 모델명 (선택사항, 기본값: google/gemma-4-31b-it:free)
+export LLM_MODEL="google/gemma-4-31b-it:free"
+
 # Figma 개인 액세스 토큰 (Figma PAT, REST API 호출용)
 export FIGMA_PAT="your_figma_personal_access_token"
 
@@ -68,6 +71,12 @@ go run cmd/cardnews/main.go -output output -topn 3
 특정 주제를 지정하여 카드뉴스를 추출하려면 `-query` 옵션을 전달합니다. 이 경우 자동 선정은 건너뜁니다.
 ```bash
 go run cmd/cardnews/main.go -query "한국은행 기준금리 동결" -output output -topn 3
+```
+
+### 3.3 모델 커스텀 모드
+특정 LLM 모델을 사용하려면 `-model` 플래그를 넘겨 실행하거나 `LLM_MODEL` 환경 변수를 설정합니다.
+```bash
+go run cmd/cardnews/main.go -model "meta-llama/llama-3-70b-instruct:free" -output output
 ```
 
 ---

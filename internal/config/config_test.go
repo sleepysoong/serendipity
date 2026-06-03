@@ -49,6 +49,9 @@ func TestLoadConfig_Success(t *testing.T) {
 	if cfg.OpenRouterAPIKey != "openrouter-test-key" {
 		t.Errorf("OpenRouterAPIKey 값 불일치: 예상 'openrouter-test-key', 실제 %q", cfg.OpenRouterAPIKey)
 	}
+	if cfg.LLMModel != "google/gemma-4-31b-it:free" {
+		t.Errorf("LLMModel 기본값 불일치: 예상 'google/gemma-4-31b-it:free', 실제 %q", cfg.LLMModel)
+	}
 	if cfg.FigmaPAT != "figma-test-pat" {
 		t.Errorf("FigmaPAT 값 불일치: 예상 'figma-test-pat', 실제 %q", cfg.FigmaPAT)
 	}

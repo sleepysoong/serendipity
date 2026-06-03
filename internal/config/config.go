@@ -11,6 +11,7 @@ import (
 type Config struct {
 	BraveAPIKey      string
 	OpenRouterAPIKey string
+	LLMModel         string
 	FigmaPAT         string
 	FigmaFileKey     string
 	FigmaMCPEndpoint string
@@ -35,6 +36,11 @@ func LoadConfig(ctx context.Context, manifestPath string) (*Config, error) {
 	openRouterKey := os.Getenv("OPENROUTER_API_KEY")
 	if openRouterKey == "" {
 		return nil, fmt.Errorf("OPENROUTER_API_KEY 환경 변수가 설정되지 않았습니다")
+	}
+
+	llmModel := os.Getenv("LLM_MODEL")
+	if llmModel == "" {
+		llmModel = "google/gemma-4-31b-it:free"
 	}
 
 	figmaPAT := os.Getenv("FIGMA_PAT")
@@ -69,6 +75,7 @@ func LoadConfig(ctx context.Context, manifestPath string) (*Config, error) {
 	return &Config{
 		BraveAPIKey:      braveKey,
 		OpenRouterAPIKey: openRouterKey,
+		LLMModel:         llmModel,
 		FigmaPAT:         figmaPAT,
 		FigmaFileKey:     figmaFileKey,
 		FigmaMCPEndpoint: figmaMCPEndpoint,

@@ -52,8 +52,7 @@ func SanitizeJSON(raw string) string {
 }
 
 // SelectTopic analyzes trending news context and selects the single best topic for card news.
-func SelectTopic(ctx context.Context, apiKey, trendingContext string) (string, error) {
-	model := "google/gemma-4-31b-it:free"
+func SelectTopic(ctx context.Context, apiKey, model, trendingContext string) (string, error) {
 
 	systemPrompt := `당신은 트렌디한 뉴스 편집장입니다. 제공된 최신 뉴스 검색 결과(컨텍스트)를 분석하여, 대중에게 가장 유용하고 흥미로운 단 하나의 카드뉴스 주제를 선정해야 합니다.
 
@@ -158,8 +157,7 @@ func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages 
 }
 
 // GenerateCardNews orchestrates the OpenRouter request and handles response parsing with retries and exponential backoff.
-func GenerateCardNews(ctx context.Context, apiKey, groundingContext string) ([]CardContent, error) {
-	model := "google/gemma-4-31b-it:free"
+func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext string) ([]CardContent, error) {
 
 	systemPrompt := `당신은 전문 콘텐츠 크리에이터입니다. 제공된 검색 컨텍스트에서 주요 뉴스 포인트를 추출하여 순차적인 카드뉴스 슬라이드로 포맷팅하는 것이 당신의 임무입니다.
 

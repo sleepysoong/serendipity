@@ -24,6 +24,7 @@ func main() {
 	// 2. Parse command-line flags
 	queryFlag := flag.String("query", "", "특정 주제로 카드뉴스를 생성할 경우의 검색 쿼리 (비어있으면 자동 주제 선정 모드)")
 	autoFlag := flag.Bool("auto", true, "자동으로 오늘의 뉴스 주제를 선정할지 여부")
+	modelFlag := flag.String("model", "", "사용할 LLM 모델명 (비어있으면 환경 변수 LLM_MODEL 또는 기본 gemma-4 모델 사용)")
 	manifestFlag := flag.String("manifest", "manifest.json", "Figma 노드 매핑 매니페스트 JSON 파일 경로")
 	outputDirFlag := flag.String("output", "output", "내보낸 카드뉴스 PNG를 저장할 로컬 디렉토리")
 	topNFlag := flag.Int("topn", 3, "수집할 Brave Search 검색 결과 개수")
@@ -46,7 +47,7 @@ func main() {
 	log.Printf("상위 N개 결과: %d", *topNFlag)
 
 	// Execute pipeline and print structured error messages if any phase fails
-	if err := runPipeline(ctx, *queryFlag, *manifestFlag, *outputDirFlag, *topNFlag, autoSelect); err != nil {
+	if err := runPipeline(ctx, *queryFlag, *modelFlag, *manifestFlag, *outputDirFlag, *topNFlag, autoSelect); err != nil {
 		log.Printf("[치명적 오류] 파이프라인 실행 실패: %v", err)
 		os.Exit(1)
 	}
@@ -55,7 +56,7 @@ func main() {
 }
 
 // runPipeline orchestrates pipeline phases:
-func runPipeline(ctx context.Context, query, manifestPath, outputDir string, topN int, autoSelect bool) error {
+func runPipeline(ctx context.Context, query, modelOverride, manifestPath, outputDir string, topN int, autoSelect bool) error {
 	// Step 1: Environment and configuration loading
 	log.Println("[1/6] 설정 및 매핑 매니페스트를 불러오는 중...")
 	cfg, err := config.LoadConfig(ctx, manifestPath)
@@ -63,6 +64,13 @@ func runPipeline(ctx context.Context, query, manifestPath, outputDir string, top
 		return fmt.Errorf("설정 로드 단계 실패: %w", err)
 	}
 	log.Println("설정이 성공적으로 로드되었습니다.")
+
+	// 사용할 모델 결정
+	model := cfg.LLMModel
+	if modelOverride != "" {
+		model = modelOverride
+	}
+	log.Printf("사용할 LLM 모델: %s", model)
 
 	selectedTopic := query
 
@@ -77,7 +85,7 @@ func runPipeline(ctx context.Context, query, manifestPath, outputDir string, top
 		}
 
 		log.Println("최신 뉴스 분석 및 적합한 주제 선정을 위한 LLM 가동 중...")
-		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, trendingContext)
+		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, model, trendingContext)
 		if err != nil {
 			return fmt.Errorf("자동 카드뉴스 주제 선정 실패: %w", err)
 		}
@@ -94,8 +102,8 @@ func runPipeline(ctx context.Context, query, manifestPath, outputDir string, top
 	log.Println("기반 컨텍스트가 성공적으로 구축되었습니다.")
 
 	// Step 3: Structured content generation via OpenRouter Gemma 4
-	log.Println("[3/6] 구조화된 카드 추론을 위해 OpenRouter Gemma 4를 호출하는 중...")
-	cards, err := llm.GenerateCardNews(ctx, cfg.OpenRouterAPIKey, groundingContext)
+	log.Printf("[3/6] 구조화된 카드 추론을 위해 OpenRouter %s 모델을 호출하는 중...", model)
+	cards, err := llm.GenerateCardNews(ctx, cfg.OpenRouterAPIKey, model, groundingContext)
 	if err != nil {
 		return fmt.Errorf("추론 및 구조화 단계 실패: %w", err)
 	}
