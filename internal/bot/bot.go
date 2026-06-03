@@ -291,7 +291,7 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 	b.Cache[resultID] = CachedResult{Result: res, Topic: res.Topic}
 	b.mu.Unlock()
 
-	// 컴포넌트 추가 (텍스트 변경, 이미지 변경 버튼)
+	// 컴포넌트 추가 (텍스트 변경, 이미지 다시 찾기, 이미지 직접 업로드)
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
@@ -301,9 +301,14 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 					CustomID: "text_edit:" + resultID,
 				},
 				discordgo.Button{
-					Label:    "이미지 변경",
+					Label:    "다른 이미지 찾기",
 					Style:    discordgo.PrimaryButton,
-					CustomID: "img_menu:" + resultID,
+					CustomID: "img_search:" + resultID,
+				},
+				discordgo.Button{
+					Label:    "이미지 직접 업로드",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "img_upload:" + resultID,
 				},
 			},
 		},
@@ -393,52 +398,20 @@ func (b *Bot) handleComponent(s *discordgo.Session, i *discordgo.InteractionCrea
 		return
 	}
 
-	if strings.HasPrefix(id, "img_menu:") {
-		resultID := strings.TrimPrefix(id, "img_menu:")
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "이미지 변경 옵션을 선택하세요:",
-				Flags:   discordgo.MessageFlagsEphemeral,
-				Components: []discordgo.MessageComponent{
-					discordgo.ActionsRow{
-						Components: []discordgo.MessageComponent{
-							discordgo.Button{
-								Label:    "다른 이미지 찾기",
-								Style:    discordgo.PrimaryButton,
-								CustomID: "img_search:" + resultID,
-							},
-							discordgo.Button{
-								Label:    "이미지 업로드",
-								Style:    discordgo.SecondaryButton,
-								CustomID: "img_upload:" + resultID,
-							},
-						},
-					},
-				},
-			},
-		})
-		return
-	}
+
 
 	if strings.HasPrefix(id, "img_search:") {
 		resultID := strings.TrimPrefix(id, "img_search:")
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "새로운 이미지를 탐색하여 재생성합니다...",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
 		})
 
 		b.mu.Lock()
 		cached, ok := b.Cache[resultID]
 		b.mu.Unlock()
 		if ok {
-			// Trigger full pipeline again to get new images but this will also re-gen text.
-			// The user said "다른 이미지 찾기를 누르면 다시 이미지를 찾아줘. 또 3개 중에 고르게 해."
-			// We can just call pipeline.Run again with the same topic.
-			go b.generateAndSend(i.ChannelID, cached.Topic, nil)
+			// Pass interaction down so it overwrites the original message
+			go b.generateAndSend(i.ChannelID, cached.Topic, i.Interaction)
 		}
 		return
 	}
@@ -539,9 +512,14 @@ func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, i
 					CustomID: "text_edit:" + resultID,
 				},
 				discordgo.Button{
-					Label:    "이미지 변경",
+					Label:    "다른 이미지 찾기",
 					Style:    discordgo.PrimaryButton,
-					CustomID: "img_menu:" + resultID,
+					CustomID: "img_search:" + resultID,
+				},
+				discordgo.Button{
+					Label:    "이미지 직접 업로드",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "img_upload:" + resultID,
 				},
 			},
 		},
