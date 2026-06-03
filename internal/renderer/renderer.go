@@ -28,10 +28,9 @@ const (
 	scaleFactor = 2.4
 )
 
-// 폰트 CDN 다운로드 URL (fonts-archive)
 var fontSources = map[string]string{
-	"cafe24": "https://cdn.jsdelivr.net/gh/fonts-archive/Cafe24MeongiBlack/Cafe24MeongiBlack.ttf",
-	"poster": "https://cdn.jsdelivr.net/gh/fonts-archive/HakgyoansimPosterB/HakgyoansimPosterB.ttf",
+	"cafe24": "https://cdn.jsdelivr.net/gh/fonts-archive/Cafe24MeongiBlack/Cafe24Meongi-B-v1.0.ttf",
+	"poster": "https://cdn.jsdelivr.net/gh/fonts-archive/HakgyoansimPosterB/Hakgyoansim_PosterB.ttf",
 }
 
 // ensureFont는 폰트 파일이 로컬에 없으면 CDN에서 다운로드하여 캐싱합니다.
