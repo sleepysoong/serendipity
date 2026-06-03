@@ -1,14 +1,15 @@
 # 자동화 카드뉴스 생성 파이프라인 (Serendipity)
 
-Brave Search API, OpenRouter LLM, headless Chrome(chromedp)을 연동하여 카드뉴스 기획부터 이미지 렌더링까지 전 과정을 무인으로 자동화하는 Go 기반 파이프라인입니다.
+Brave Search API, OpenRouter LLM, Go 이미지 라이브러리(`fogleman/gg`)를 연동하여 카드뉴스 기획부터 이미지 렌더링까지 전 과정을 무인으로 자동화하는 Go 기반 파이프라인입니다.
 
 ---
 
 ## 1. 주요 특징
 1. **자동 뉴스거리 선정 모드 (Search + LLM)**: 사용자가 직접 주제를 입력하지 않아도 실시간 핫이슈를 검색하여 흥미로운 주제를 자동 선정합니다.
 2. **엄격한 자연어 추론**: 제목 15자, 본문 50자 이내의 글자수 유효성 검증과 JSON 위생처리가 탑재된 LLM 파싱 시스템입니다.
-3. **HTML 기반 카드뉴스 렌더링**: Go 내장 HTML 템플릿과 headless Chrome(chromedp)을 활용하여 고품질 1080×1080 PNG 카드 이미지를 자동 생성합니다.
+3. **네이티브 이미지 렌더링**: Go 이미지 라이브러리(`fogleman/gg`)로 그라디언트 배경, 한글 폰트, 1080×1080 PNG 카드 이미지를 직접 생성합니다. 외부 브라우저 의존 없음.
 4. **커스텀 LLM 모델 지원**: 환경 변수 또는 CLI 플래그로 LLM 모델을 자유롭게 변경할 수 있습니다.
+5. **자동 폰트 관리**: 한글 폰트(Cafe24, Hakgyoansim)를 CDN에서 자동 다운로드하여 로컬에 캐싱합니다.
 
 ---
 
@@ -16,15 +17,7 @@ Brave Search API, OpenRouter LLM, headless Chrome(chromedp)을 연동하여 카�
 
 ### 2.1 시스템 의존성
 - **Go 1.25+**
-- **Google Chrome** 또는 **Chromium** (headless 모드로 카드 이미지를 렌더링하는 데 사용)
-
-```bash
-# Ubuntu/Debian 기준 Chrome 설치
-sudo apt-get install -y chromium-browser
-
-# macOS (Homebrew)
-brew install --cask google-chrome
-```
+- 인터넷 연결 (최초 실행 시 한글 폰트 자동 다운로드)
 
 ### 2.2 환경 변수 설정
 프로젝트 구동을 위해 다음 환경 변수들을 세팅해야 합니다.
@@ -106,7 +99,7 @@ go run cmd/cardnews/main.go -model "meta-llama/llama-3-70b-instruct:free" -outpu
   ↓
 [3/4] OpenRouter LLM으로 구조화된 카드 콘텐츠(제목/본문) 생성
   ↓
-[4/4] HTML 템플릿 렌더링 → headless Chrome 스크린샷 → PNG 저장
+[4/4] Go 이미지 라이브러리(gg)로 카드뉴스 이미지 직접 렌더링 → PNG 저장
 ```
 
 ---

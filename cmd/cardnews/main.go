@@ -114,8 +114,8 @@ func runPipeline(ctx context.Context, query, modelOverride, outputDir string, to
 		log.Printf("  카드 %d: [%s] -> %s", idx+1, card.Title, card.Body)
 	}
 
-	// 4단계: HTML 렌더링 + chromedp 스크린샷으로 PNG 생성
-	log.Println("[4/4] HTML 템플릿 렌더링 및 headless Chrome으로 카드 이미지를 생성하는 중...")
+	// 4단계: Go 이미지 라이브러리(gg)로 카드뉴스 PNG 생성
+	log.Println("[4/4] Go 이미지 라이브러리(gg)로 카드뉴스 이미지를 렌더링하는 중...")
 	if err := renderer.RenderCards(ctx, cards, outputDir); err != nil {
 		return fmt.Errorf("카드 이미지 렌더링 단계 실패: %w", err)
 	}

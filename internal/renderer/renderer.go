@@ -3,206 +3,168 @@ package renderer
 import (
 	"context"
 	"fmt"
-	"html/template"
+	"image/color"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/fogleman/gg"
 	"serendipity/internal/llm"
-
-	"github.com/chromedp/chromedp"
 )
 
-// cardTemplateData는 HTML 템플릿에 주입할 단일 카드 데이터입니다.
-type cardTemplateData struct {
-	Index int
-	Title string
-	Body  string
+const (
+	cardWidth  = 1080
+	cardHeight = 1080
+)
+
+// 폰트 다운로드 URL (fonts-archive CDN)
+var fontSources = map[string]string{
+	"cafe24": "https://cdn.jsdelivr.net/gh/fonts-archive/Cafe24MeongiBlack/Cafe24MeongiBlack.ttf",
+	"poster": "https://cdn.jsdelivr.net/gh/fonts-archive/HakgyoansimPosterB/HakgyoansimPosterB.ttf",
 }
 
-// htmlTemplate는 카드뉴스 한 장을 렌더링하기 위한 HTML 템플릿입니다.
-// 사용자가 제공한 카드뉴스 메이커 HTML과 동일한 디자인을 적용합니다.
-const htmlTemplate = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fonts-archive/Cafe24MeongiBlack/Cafe24Meongi-B-v1.0.css" type="text/css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fonts-archive/HakgyoansimPosterB/Hakgyoansim_PosterB.css" type="text/css" />
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+// ensureFont는 폰트 파일이 로컬에 없으면 CDN에서 다운로드하여 캐싱합니다.
+func ensureFont(name, url, cacheDir string) (string, error) {
+	fontPath := filepath.Join(cacheDir, name+".ttf")
 
-        .font-cafe24 {
-            font-family: "Cafe24 Meongi B", -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        .font-poster {
-            font-family: "Hakgyoansim Poster B", -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        .tracking-tight { letter-spacing: -0.02em; }
+	// 이미 캐시된 폰트가 있으면 바로 반환
+	if info, err := os.Stat(fontPath); err == nil && info.Size() > 0 {
+		return fontPath, nil
+	}
 
-        .card-container {
-            width: 1080px;
-            height: 1080px;
-            position: relative;
-            overflow: hidden;
-        }
+	log.Printf("폰트 '%s' 다운로드 중: %s", name, url)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("폰트 캐시 디렉토리 생성 실패: %w", err)
+	}
 
-        /* 그라디언트 배경 */
-        .bg-gradient {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("폰트 다운로드 요청 실패: %w", err)
+	}
+	defer resp.Body.Close()
 
-        /* 카드 내부 레이아웃 */
-        .card-inner {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 80px;
-            text-align: center;
-        }
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("폰트 다운로드 실패 (HTTP %d)", resp.StatusCode)
+	}
 
-        /* 페이지 번호 뱃지 */
-        .page-badge {
-            position: absolute;
-            top: 40px;
-            right: 40px;
-            background: rgba(255,255,255,0.2);
-            backdrop-filter: blur(10px);
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 24px;
-            font-weight: bold;
-        }
+	f, err := os.Create(fontPath)
+	if err != nil {
+		return "", fmt.Errorf("폰트 파일 생성 실패: %w", err)
+	}
+	defer f.Close()
 
-        /* 장식용 라인 */
-        .decorative-line {
-            width: 80px;
-            height: 4px;
-            background: rgba(255,255,255,0.6);
-            border-radius: 2px;
-            margin: 30px 0;
-        }
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return "", fmt.Errorf("폰트 파일 저장 실패: %w", err)
+	}
 
-        .title-text {
-            color: white;
-            font-size: 64px;
-            line-height: 1.3;
-            margin-bottom: 10px;
-            word-break: keep-all;
-        }
+	log.Printf("폰트 '%s' 캐싱 완료: %s", name, fontPath)
+	return fontPath, nil
+}
 
-        .body-text {
-            color: rgba(255,255,255,0.9);
-            font-size: 32px;
-            line-height: 1.6;
-            word-break: keep-all;
-        }
-
-        /* 하단 브랜딩 */
-        .branding {
-            position: absolute;
-            bottom: 40px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            color: rgba(255,255,255,0.4);
-            font-size: 16px;
-        }
-    </style>
-</head>
-<body>
-    <div id="card" class="card-container bg-gradient">
-        <div class="card-inner">
-            <div class="page-badge font-poster">{{.Index}}</div>
-            <h1 class="title-text font-cafe24 tracking-tight">{{.Title}}</h1>
-            <div class="decorative-line"></div>
-            <p class="body-text font-poster">{{.Body}}</p>
-        </div>
-        <div class="branding font-poster">Serendipity 카드뉴스</div>
-    </div>
-</body>
-</html>`
-
-// RenderCards는 LLM이 생성한 카드 콘텐츠를 HTML로 렌더링한 뒤
-// chromedp(headless Chrome)를 사용하여 각 카드를 PNG 이미지로 캡처합니다.
+// RenderCards는 LLM이 생성한 카드 콘텐츠를 Go 이미지 라이브러리(gg)로
+// 직접 그려서 1080×1080 PNG 카드뉴스 이미지를 생성합니다.
 func RenderCards(ctx context.Context, cards []llm.CardContent, outputDir string) error {
-	// 출력 디렉토리 생성
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("출력 디렉토리 %s 생성 실패: %w", outputDir, err)
 	}
 
-	// HTML 템플릿 파싱
-	tmpl, err := template.New("card").Parse(htmlTemplate)
+	// 폰트 다운로드 및 캐싱
+	fontDir := filepath.Join(outputDir, ".fonts")
+	cafe24Path, err := ensureFont("cafe24", fontSources["cafe24"], fontDir)
 	if err != nil {
-		return fmt.Errorf("HTML 템플릿 파싱 실패: %w", err)
+		return fmt.Errorf("Cafe24 폰트 준비 실패: %w", err)
+	}
+	posterPath, err := ensureFont("poster", fontSources["poster"], fontDir)
+	if err != nil {
+		return fmt.Errorf("Poster 폰트 준비 실패: %w", err)
 	}
 
-	// chromedp 컨텍스트 생성 (headless Chrome)
-	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx,
-		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.WindowSize(1080, 1080),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-		)...,
-	)
-	defer allocCancel()
-
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-	defer browserCancel()
-
 	for i, card := range cards {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("카드 렌더링 중 컨텍스트 취소: %w", ctx.Err())
+		default:
+		}
+
 		cardIndex := i + 1
 		log.Printf("카드 %d/%d 렌더링 중: [%s]", cardIndex, len(cards), card.Title)
 
-		// HTML 문자열 생성
-		data := cardTemplateData{
-			Index: cardIndex,
-			Title: card.Title,
-			Body:  card.Body,
+		if err := renderSingleCard(card, cardIndex, cafe24Path, posterPath, outputDir); err != nil {
+			return fmt.Errorf("카드 %d 렌더링 실패: %w", cardIndex, err)
 		}
-
-		var htmlBuf strings.Builder
-		if err := tmpl.Execute(&htmlBuf, data); err != nil {
-			return fmt.Errorf("카드 %d HTML 생성 실패: %w", cardIndex, err)
-		}
-
-		// 임시 HTML 파일 저장 (chromedp가 파일 URL로 로드)
-		tmpHTMLPath := filepath.Join(outputDir, fmt.Sprintf("_temp_card_%d.html", cardIndex))
-		if err := os.WriteFile(tmpHTMLPath, []byte(htmlBuf.String()), 0644); err != nil {
-			return fmt.Errorf("카드 %d 임시 HTML 파일 작성 실패: %w", cardIndex, err)
-		}
-		defer os.Remove(tmpHTMLPath) // 렌더링 완료 후 임시 파일 삭제
-
-		// chromedp로 스크린샷 캡처
-		var buf []byte
-		fileURL := "file://" + tmpHTMLPath
-
-		if err := chromedp.Run(browserCtx,
-			chromedp.Navigate(fileURL),
-			chromedp.WaitReady("#card"),
-			chromedp.Screenshot("#card", &buf, chromedp.NodeVisible),
-		); err != nil {
-			return fmt.Errorf("카드 %d 스크린샷 캡처 실패: %w", cardIndex, err)
-		}
-
-		// PNG 파일 저장
-		outputPath := filepath.Join(outputDir, fmt.Sprintf("card_page_%d.png", cardIndex))
-		if err := os.WriteFile(outputPath, buf, 0644); err != nil {
-			return fmt.Errorf("카드 %d 이미지 저장 실패: %w", cardIndex, err)
-		}
-
-		log.Printf("카드 %d 렌더링 완료: %s", cardIndex, outputPath)
 	}
 
 	log.Printf("모든 %d개 카드 이미지가 %s/ 에 저장되었습니다", len(cards), outputDir)
+	return nil
+}
+
+// renderSingleCard는 단일 카드 한 장을 이미지로 렌더링합니다.
+func renderSingleCard(card llm.CardContent, index int, cafe24Path, posterPath, outputDir string) error {
+	dc := gg.NewContext(cardWidth, cardHeight)
+
+	// ── 1. 그라디언트 배경 (135도: 좌상단 → 우하단, #667eea → #764ba2) ──
+	grad := gg.NewLinearGradient(0, 0, cardWidth, cardHeight)
+	grad.AddColorStop(0, color.RGBA{R: 0x66, G: 0x7E, B: 0xEA, A: 0xFF})
+	grad.AddColorStop(1, color.RGBA{R: 0x76, G: 0x4B, B: 0xA2, A: 0xFF})
+	dc.SetFillStyle(grad)
+	dc.DrawRectangle(0, 0, cardWidth, cardHeight)
+	dc.Fill()
+
+	// ── 2. 페이지 번호 뱃지 (우상단 원형) ──
+	badgeCX := float64(cardWidth) - 70
+	badgeCY := 70.0
+	badgeRadius := 30.0
+
+	// 반투명 흰색 원 배경 (rgba 255,255,255,0.2)
+	dc.SetColor(color.RGBA{R: 255, G: 255, B: 255, A: 51})
+	dc.DrawCircle(badgeCX, badgeCY, badgeRadius)
+	dc.Fill()
+
+	// 뱃지 숫자
+	if err := dc.LoadFontFace(posterPath, 24); err != nil {
+		return fmt.Errorf("뱃지 폰트 로드 실패: %w", err)
+	}
+	dc.SetColor(color.White)
+	dc.DrawStringAnchored(fmt.Sprintf("%d", index), badgeCX, badgeCY, 0.5, 0.5)
+
+	// ── 3. 제목 텍스트 (중앙 상단) ──
+	if err := dc.LoadFontFace(cafe24Path, 64); err != nil {
+		return fmt.Errorf("제목 폰트 로드 실패: %w", err)
+	}
+	dc.SetColor(color.White)
+	titleY := float64(cardHeight)/2 - 60
+	dc.DrawStringWrapped(card.Title, float64(cardWidth)/2, titleY, 0.5, 0.5, float64(cardWidth)-160, 1.3, gg.AlignCenter)
+
+	// ── 4. 장식용 구분선 ──
+	lineY := float64(cardHeight) / 2
+	dc.SetColor(color.RGBA{R: 255, G: 255, B: 255, A: 153}) // rgba(255,255,255,0.6)
+	dc.SetLineWidth(4)
+	dc.DrawLine(float64(cardWidth)/2-40, lineY, float64(cardWidth)/2+40, lineY)
+	dc.Stroke()
+
+	// ── 5. 본문 텍스트 (중앙 하단) ──
+	if err := dc.LoadFontFace(posterPath, 32); err != nil {
+		return fmt.Errorf("본문 폰트 로드 실패: %w", err)
+	}
+	dc.SetColor(color.RGBA{R: 255, G: 255, B: 255, A: 230}) // rgba(255,255,255,0.9)
+	bodyY := float64(cardHeight)/2 + 70
+	dc.DrawStringWrapped(card.Body, float64(cardWidth)/2, bodyY, 0.5, 0.5, float64(cardWidth)-160, 1.6, gg.AlignCenter)
+
+	// ── 6. 하단 브랜딩 ──
+	if err := dc.LoadFontFace(posterPath, 16); err != nil {
+		return fmt.Errorf("브랜딩 폰트 로드 실패: %w", err)
+	}
+	dc.SetColor(color.RGBA{R: 255, G: 255, B: 255, A: 102}) // rgba(255,255,255,0.4)
+	dc.DrawStringAnchored("Serendipity 카드뉴스", float64(cardWidth)/2, float64(cardHeight)-40, 0.5, 0.5)
+
+	// ── 7. PNG 저장 ──
+	outputPath := filepath.Join(outputDir, fmt.Sprintf("card_page_%d.png", index))
+	if err := dc.SavePNG(outputPath); err != nil {
+		return fmt.Errorf("PNG 저장 실패: %w", err)
+	}
+
+	log.Printf("카드 %d 렌더링 완료: %s", index, outputPath)
 	return nil
 }
