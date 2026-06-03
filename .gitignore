@@ -1,0 +1,12 @@
+# 빌드 바이너리
+cardnews
+
+# 출력 디렉토리
+output/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
