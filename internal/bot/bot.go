@@ -54,13 +54,14 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	b := &Bot{
-		Session:    s,
-		Config:     cfg,
-		Cron:       cron.New(),
-		Ctx:        ctx,
-		Cancel:     cancel,
-		Cache:      make(map[string]CachedResult),
-		WaitUpload: make(map[string]string),
+		Session:       s,
+		Config:        cfg,
+		Cron:          cron.New(),
+		Ctx:           ctx,
+		Cancel:        cancel,
+		NewsChannelID: cfg.NewsChannelID,
+		Cache:         make(map[string]CachedResult),
+		WaitUpload:    make(map[string]string),
 	}
 
 	s.AddHandler(b.onReady)
@@ -172,6 +173,7 @@ func (b *Bot) handleNewsChannel(s *discordgo.Session, i *discordgo.InteractionCr
 	err := config.UpdateConfig(b.Ctx, func(cfg *config.Config) {
 		b.mu.Lock()
 		b.NewsChannelID = i.ChannelID
+		cfg.NewsChannelID = i.ChannelID
 		b.mu.Unlock()
 	})
 

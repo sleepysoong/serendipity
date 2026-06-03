@@ -15,6 +15,7 @@ type Config struct {
 	OpenRouterAPIKey string `yaml:"openrouter_api_key"`
 	LLMModel         string `yaml:"llm_model"`
 	DiscordBotToken  string `yaml:"discord_bot_token"`
+	NewsChannelID    string `yaml:"news_channel_id"`
 }
 
 var (
