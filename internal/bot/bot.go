@@ -264,14 +264,29 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 			targetChannel = channelID // fallback to current channel if no news channel is set
 		}
 		
-		// Discord limits messages to 2000 chars. Safely truncate using runes to avoid breaking UTF-8
 		runes := []rune(msg)
-		if len(runes) > 1990 {
-			msg = string(runes[:1980]) + "\n```" // Truncate and close markdown block safely
-		}
-		_, err := b.Session.ChannelMessageSend(targetChannel, msg)
-		if err != nil {
-			log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
+		chunkSize := 1900
+		
+		for i := 0; i < len(runes); i += chunkSize {
+			end := i + chunkSize
+			if end > len(runes) {
+				end = len(runes)
+			}
+			
+			chunk := string(runes[i:end])
+			
+			// If message is split, add markdown codeblock fences to preserve formatting roughly
+			if i > 0 && !strings.HasPrefix(chunk, "```") {
+				chunk = "```\n" + chunk
+			}
+			if end < len(runes) && !strings.HasSuffix(chunk, "```") && !strings.HasSuffix(chunk, "```\n") {
+				chunk = chunk + "\n```"
+			}
+			
+			_, err := b.Session.ChannelMessageSend(targetChannel, chunk)
+			if err != nil {
+				log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
+			}
 		}
 	}
 	
