@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/fogleman/gg"
+	_ "golang.org/x/image/webp"
 	"serendipity/internal/llm"
 )
 
@@ -94,14 +95,16 @@ func RenderCards(ctx context.Context, cards []llm.CardContent, outputDir, bgImag
 		return fmt.Errorf("Poster 폰트 준비 실패: %w", err)
 	}
 
-	// 배경 이미지 로드 (선택사항)
+	// 배경 이미지 로드 (선택사항 — 실패해도 기본 배경으로 계속 진행)
 	var bgImage image.Image
 	if bgImagePath != "" {
 		bgImage, err = gg.LoadImage(bgImagePath)
 		if err != nil {
-			return fmt.Errorf("배경 이미지 '%s' 로드 실패: %w", bgImagePath, err)
+			log.Printf("⚠️ 배경 이미지 '%s' 로드 실패 (기본 배경 사용): %v", bgImagePath, err)
+			bgImage = nil // 기본 배경으로 폴백
+		} else {
+			log.Printf("배경 이미지 로드 완료: %s", bgImagePath)
 		}
-		log.Printf("배경 이미지 로드 완료: %s", bgImagePath)
 	}
 
 	for i, card := range cards {
