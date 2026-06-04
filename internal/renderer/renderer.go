@@ -352,7 +352,11 @@ func drawTextWithSpacing(dc *gg.Context, text string, x, y, spacing float64) {
 		w, _ := dc.MeasureString(string(r))
 		currentX += w
 		if i < len(runes)-1 {
-			currentX += spacing // CSS letter-spacing에 해당
+			nextR := runes[i+1]
+			// 공백 문자(' ') 전후로는 음수 자간이 적용되어 공백이 찌그러지지 않도록 자간을 추가하지 않습니다.
+			if r != ' ' && nextR != ' ' {
+				currentX += spacing // CSS letter-spacing에 해당
+			}
 		}
 	}
 }
@@ -365,7 +369,10 @@ func measureTextWithSpacing(dc *gg.Context, text string, spacing float64) float6
 		w, _ := dc.MeasureString(string(r))
 		total += w
 		if i < len(runes)-1 {
-			total += spacing
+			nextR := runes[i+1]
+			if r != ' ' && nextR != ' ' {
+				total += spacing
+			}
 		}
 	}
 	return total
@@ -391,7 +398,10 @@ func wrapText(dc *gg.Context, text string, maxWidth, spacing float64) []string {
 			charW, _ := dc.MeasureString(string(r))
 			addedWidth := charW
 			if i > lineStart {
-				addedWidth += spacing // 첫 글자가 아니면 자간 추가
+				prevR := runes[i-1]
+				if r != ' ' && prevR != ' ' {
+					addedWidth += spacing // 첫 글자 및 공백 문자가 아니면 자간 추가
+				}
 			}
 
 			// 현재 줄에 글자가 넘치면 줄바꿈

@@ -133,6 +133,17 @@ func (b *Bot) Start() error {
 	}
 	b.Cron.Start()
 
+	// 시작 시 뉴스 채널 접근 권한 확인
+	if b.NewsChannelID != "" {
+		_, testErr := b.Session.ChannelMessageSend(b.NewsChannelID, "🤖 봇 시작 — 뉴스 채널 권한 확인 중...")
+		if testErr != nil {
+			log.Printf("⚠️ [경고] 설정된 뉴스 채널(%s)에 메시지를 보낼 수 없습니다: %v", b.NewsChannelID, testErr)
+			log.Printf("⚠️ [경고] 디스코드 서버 설정에서 봇에게 해당 채널의 '채널 보기' 및 '메시지 보내기' 권한을 부여하거나, /뉴스채널 명령어로 다른 채널을 지정해 주세요.")
+		} else {
+			log.Printf("✅ 뉴스 채널(%s) 접근 권한 확인 완료", b.NewsChannelID)
+		}
+	}
+
 	log.Println("Discord 봇이 시작되었습니다. CTRL-C를 눌러 종료하세요.")
 	return nil
 }

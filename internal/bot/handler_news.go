@@ -37,22 +37,22 @@ func (b *Bot) generateScheduledNews() {
 		return
 	}
 	
-	b.Session.ChannelMessageSend(ch, "🔔 **오늘의 뉴스 생성을 시작합니다...**")
+	// 스케줄 뉴스는 채널 권한 확인 후 전송 시도
+	_, err := b.Session.ChannelMessageSend(ch, "🔔 **오늘의 뉴스 생성을 시작합니다...**")
+	if err != nil {
+		log.Printf("[ERROR] 스케줄 뉴스 채널(%s) 접근 불가: %v — /뉴스채널 로 다시 설정 필요", ch, err)
+		return
+	}
 	b.generateAndSend(ch, "", nil)
 }
 
 func (b *Bot) generateAndSend(channelID string, topic string, interaction *discordgo.Interaction) {
 	outDir := filepath.Join("output", fmt.Sprintf("discord_%d", time.Now().Unix()))
 	
+	// 로그 전송 함수:
+	// interaction이 있으면 → 무조건 FollowupMessageCreate 사용 (403 우회)
+	// interaction이 없으면(스케줄) → ChannelMessageSend 사용
 	logFunc := func(msg string) {
-		b.mu.Lock()
-		targetChannel := b.NewsChannelID
-		b.mu.Unlock()
-		
-		if targetChannel == "" {
-			targetChannel = channelID // fallback to current channel if no news channel is set
-		}
-		
 		runes := []rune(msg)
 		chunkSize := 1900
 		
@@ -64,7 +64,6 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 			
 			chunk := string(runes[i:end])
 			
-			// If message is split, add markdown codeblock fences to preserve formatting roughly
 			if i > 0 && !strings.HasPrefix(chunk, "```") {
 				chunk = "```\n" + chunk
 			}
@@ -73,34 +72,18 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 			}
 			
 			var err error
-			// 상호작용(슬래시 명령)이 존재하고 로그 타겟 채널이 명령이 내려진 채널과 동일한 경우,
-			// 채널 메시지 전송 권한(403 Missing Access 등) 문제를 우회하기 위해 Interaction Followup을 우선 사용합니다.
-			if interaction != nil && targetChannel == channelID {
+			if interaction != nil {
+				// 슬래시 명령 → 무조건 Followup 사용 (채널 권한 불필요)
 				_, err = b.Session.FollowupMessageCreate(interaction, true, &discordgo.WebhookParams{
 					Content: chunk,
 				})
 			} else {
-				_, err = b.Session.ChannelMessageSend(targetChannel, chunk)
+				// 스케줄 → 일반 메시지
+				_, err = b.Session.ChannelMessageSend(channelID, chunk)
 			}
 			
 			if err != nil {
-				log.Printf("디스코드 로그 전송 실패 (채널 %s): %v", targetChannel, err)
-				// 만약 실패했고 interaction이 존재한다면 최후의 수단으로 interaction followup을 통해 보냅니다.
-				if interaction != nil {
-					log.Printf("Interaction Followup을 통해 로그 전송 폴백 시도...")
-					_, fallbackErr := b.Session.FollowupMessageCreate(interaction, true, &discordgo.WebhookParams{
-						Content: "[로그 폴백] " + chunk,
-					})
-					if fallbackErr != nil {
-						log.Printf("Interaction Followup 폴백도 실패: %v", fallbackErr)
-					}
-				} else if targetChannel != channelID && channelID != "" {
-					log.Printf("현재 채널(%s)로 로그 전송 폴백 시도...", channelID)
-					_, fallbackErr := b.Session.ChannelMessageSend(channelID, "[로그 폴백] "+chunk)
-					if fallbackErr != nil {
-						log.Printf("현재 채널(%s)로의 로그 폴백 전송도 실패: %v", channelID, fallbackErr)
-					}
-				}
+				log.Printf("디스코드 로그 전송 실패: %v", err)
 			}
 		}
 	}
@@ -120,12 +103,10 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 		bodyText.WriteString(fmt.Sprintf("**%s**\n%s\n\n", card.Title, card.Body))
 	}
 
-	// 이미지 파일 로드 (첫 번째 변형의 첫 번째 카드 표지)
-	// 디스크 캐싱 방지를 위해 파일명에 타임스탬프를 부여합니다.
+	// 이미지 파일 로드
 	var files []*discordgo.File
 	nowTs := time.Now().Unix()
 	for v, dir := range res.OutputDirs {
-		// 각 variation의 첫 페이지(표지)
 		coverPath := filepath.Join(dir, "card_page_1.png")
 		f, err := os.Open(coverPath)
 		if err == nil {
@@ -142,7 +123,6 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 	b.Cache[resultID] = CachedResult{Result: res, Topic: res.Topic}
 	b.mu.Unlock()
 
-	// 컴포넌트 추가 (텍스트 변경, 이미지 다시 찾기, 이미지 직접 업로드)
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
@@ -165,15 +145,9 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 		},
 	}
 
-	warningMsg := ""
-	perms, permErr := b.Session.UserChannelPermissions(b.Session.State.User.ID, channelID)
-	if permErr != nil || (perms&discordgo.PermissionViewChannel) == 0 || (perms&discordgo.PermissionSendMessages) == 0 {
-		warningMsg = "\n\n⚠️ **[권한 경고] 봇의 채널 권한 설정이 필요합니다!**\n현재 봇에게 이 채널의 **'채널 보기(View Channel)'** 및 **'메시지 보내기(Send Messages)'** 권한이 부여되지 않았습니다.\n이 권한이 없으면 **로그 전송** 및 **이미지 직접 업로드** 기능이 작동할 수 없습니다. 서버 설정에서 봇에게 해당 권한을 꼭 부여해 주세요!"
-	}
-
-	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 3개 중 하나를 선택해 주세요)%s", res.Topic, bodyText.String(), warningMsg)
+	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 3개 중 하나를 선택해 주세요)", res.Topic, bodyText.String())
 	if len(msgContent) > 2000 {
-		msgContent = msgContent[:1990] + "..." // Discord limit
+		msgContent = msgContent[:1990] + "..."
 	}
 
 	b.sendOrEdit(channelID, msgContent, files, interaction, components...)
@@ -227,13 +201,7 @@ func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, i
 		},
 	}
 
-	warningMsg := ""
-	perms, permErr := b.Session.UserChannelPermissions(b.Session.State.User.ID, channelID)
-	if permErr != nil || (perms&discordgo.PermissionViewChannel) == 0 || (perms&discordgo.PermissionSendMessages) == 0 {
-		warningMsg = "\n\n⚠️ **[권한 경고] 봇의 채널 권한 설정이 필요합니다!**\n현재 봇에게 이 채널의 **'채널 보기(View Channel)'** 및 **'메시지 보내기(Send Messages)'** 권한이 부여되지 않았습니다.\n이 권한이 없으면 **로그 전송** 및 **이미지 직접 업로드** 기능이 작동할 수 없습니다. 서버 설정에서 봇에게 해당 권한을 꼭 부여해 주세요!"
-	}
-
-	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 중 하나를 선택해 주세요)%s", res.Topic, bodyText.String(), warningMsg)
+	msgContent := fmt.Sprintf("## 인스타그램 업로드용 기사 (%s)\n%s\n(제공된 표지 중 하나를 선택해 주세요)", res.Topic, bodyText.String())
 	if len(msgContent) > 2000 {
 		msgContent = msgContent[:1990] + "..."
 	}
