@@ -73,8 +73,38 @@ func (b *Bot) createLogThread(channelID string) string {
 func (b *Bot) generateAndSend(channelID string, topic string, interaction *discordgo.Interaction) {
 	outDir := filepath.Join("output", fmt.Sprintf("discord_%d", time.Now().Unix()))
 
-	// 로그 스레드 생성 (일반 메시지 기반 — Followup 사용 안 함)
-	logThreadID := b.createLogThread(channelID)
+	// 현재 채널이 이미 스레드인지 확인
+	isThread := false
+	if ch, err := b.Session.Channel(channelID); err == nil {
+		if ch.Type == discordgo.ChannelTypeGuildPublicThread ||
+			ch.Type == discordgo.ChannelTypeGuildPrivateThread ||
+			ch.Type == discordgo.ChannelTypeGuildNewsThread {
+			isThread = true
+		}
+	}
+
+	var logThreadID string
+	if isThread {
+		// 이미 스레드 내부인 경우 기존 스레드를 계속 사용
+		logThreadID = channelID
+		// 재진행 알림
+		_, _ = b.Session.ChannelMessageSend(logThreadID, "🔄 **새로운 이미지를 검색하여 뉴스 카드를 다시 생성 중입니다...**")
+	} else {
+		// 메인 채널인 경우 새로운 로그 스레드 생성
+		logThreadID = b.createLogThread(channelID)
+
+		// 메인 채널의 Slash Command Interaction이 있는 경우,
+		// 메인 채널의 interaction response를 스레드 생성 안내 메시지로 변경해 둠
+		if interaction != nil {
+			statusMsg := "🔄 **뉴스 생성을 시작합니다...**\n생성 진행 상황과 최종 결과물은 아래 생성된 스레드에서 확인해 주세요!"
+			_, err := b.Session.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+				Content: &statusMsg,
+			})
+			if err != nil {
+				log.Printf("Interaction 초기 Status Edit 실패: %v", err)
+			}
+		}
+	}
 
 	// 로그 전송 함수:
 	// 1순위: 스레드가 있으면 → 스레드에 전송 (채널 깨끗하게 유지)
@@ -124,9 +154,9 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 	// 스레드에 완료/에러 메시지 남기기
 	if logThreadID != "" {
 		if err != nil {
-			b.Session.ChannelMessageSend(logThreadID, fmt.Sprintf("❌ **생성 실패:** %s", err.Error()))
+			_, _ = b.Session.ChannelMessageSend(logThreadID, fmt.Sprintf("❌ **생성 실패:** %s", err.Error()))
 		} else {
-			b.Session.ChannelMessageSend(logThreadID, "✅ **뉴스 생성 완료!** 메인 채널을 확인하세요.")
+			_, _ = b.Session.ChannelMessageSend(logThreadID, "✅ **뉴스 생성 완료!**")
 		}
 	}
 
@@ -190,7 +220,34 @@ func (b *Bot) generateAndSend(channelID string, topic string, interaction *disco
 		msgContent = msgContent[:1990] + "..."
 	}
 
-	b.sendOrEdit(channelID, msgContent, files, interaction, components...)
+	// 전송 또는 업데이트
+	if !isThread && logThreadID != "" {
+		// 메인 채널에서 최초 생성 후, 최종 결과물(인터랙션 메시지)을 메인 채널이 아니라 새로 생성된 스레드로 전송!
+		_, errMsg := b.Session.ChannelMessageSendComplex(logThreadID, &discordgo.MessageSend{
+			Content:    msgContent,
+			Files:      files,
+			Components: components,
+		})
+		if errMsg != nil {
+			log.Printf("스레드에 최종 결과물 전송 실패: %v", errMsg)
+			// 폴백으로 메인 채널에 전송 시도
+			b.sendOrEdit(channelID, msgContent, files, interaction, components...)
+		} else {
+			// 메인 채널의 Slash Command Interaction 완료 처리
+			if interaction != nil {
+				doneMsg := "✅ **뉴스 생성이 완료되었습니다!** 아래 생성된 스레드에서 결과물을 확인해 주세요."
+				_, errEdit := b.Session.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+					Content: &doneMsg,
+				})
+				if errEdit != nil {
+					log.Printf("Interaction 완료 업데이트 실패: %v", errEdit)
+				}
+			}
+		}
+	} else {
+		// 이미 스레드 내부이거나 스레드 생성을 하지 않은 경우 (예: 스레드 내부에서 '다른 이미지 찾기'를 눌러 interaction을 edit해야 하는 경우)
+		b.sendOrEdit(channelID, msgContent, files, interaction, components...)
+	}
 }
 
 func (b *Bot) sendUpdatedCards(channelID string, res *pipeline.PipelineResult, interaction *discordgo.Interaction) {
