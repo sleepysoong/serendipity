@@ -156,6 +156,76 @@ func callOpenRouterForTopic(ctx context.Context, apiKey, model string, messages 
 	return topic, nil
 }
 
+// SelectArticleID uses the LLM to choose the most interesting article ID from a formatted list.
+func SelectArticleID(ctx context.Context, apiKey, model, articlesContext string, logf func(string)) (string, error) {
+	systemPrompt := prompts.SelectArticleSystem
+	userPrompt := fmt.Sprintf("다음 기사 목록 중에서 카드뉴스로 만들었을 때 가장 파급력이 크고 흥미로운 기사 하나의 ID를 선택해주세요.\n\n[기사 목록]\n%s", articlesContext)
+
+	messages := []Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	reqBody := ChatCompletionRequest{
+		Model:       model,
+		Messages:    messages,
+		Temperature: 0.2, // Low temperature for consistent ID extraction
+	}
+
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("요청 JSON 직렬화 실패: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(reqBytes))
+	if err != nil {
+		return "", fmt.Errorf("요청 생성 실패: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter API 호출 실패: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("OpenRouter가 상태 코드 %d를 반환했습니다. 응답: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("OpenRouter 응답 읽기 실패: %w", err)
+	}
+
+	var chatResponse ChatCompletionResponse
+	if err := json.Unmarshal(bodyBytes, &chatResponse); err != nil {
+		return "", fmt.Errorf("OpenRouter 응답 JSON 파싱 실패: %w", err)
+	}
+
+	if len(chatResponse.Choices) == 0 {
+		return "", fmt.Errorf("OpenRouter 응답에 완성 결과(Choices)가 없습니다")
+	}
+
+	rawContent := chatResponse.Choices[0].Message.Content
+	
+	if logf != nil {
+		logf(fmt.Sprintf("● **`인공지능 응답을 받았습니다`**  |  ```\n%s\n```", rawContent))
+	}
+	
+	id := strings.TrimSpace(rawContent)
+	id = strings.Trim(id, "`'\" \n\r\t")
+	if id == "" {
+		return "", fmt.Errorf("추출된 기사 ID가 비어있습니다")
+	}
+
+	return id, nil
+}
+
 // GenerateCardNews orchestrates the OpenRouter request and handles response parsing with retries and exponential backoff.
 func GenerateCardNews(ctx context.Context, apiKey, model, groundingContext string, logf func(string)) ([]CardContent, error) {
 	systemPrompt := prompts.GenerateCardNewsSystem

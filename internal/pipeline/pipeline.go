@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"serendipity/internal/config"
 	"serendipity/internal/llm"
@@ -23,37 +24,91 @@ type PipelineResult struct {
 	BgImageURLs []string
 }
 
-// Run executes the cardnews generation pipeline.
 func Run(ctx context.Context, cfg *config.Config, query, outputBaseDir string, autoSelect bool, logf func(string)) (*PipelineResult, error) {
 	log.Println("[1/5] 뉴스거리 탐색 및 선정...")
 	selectedTopic := query
+	var groundingContext string
 
 	if autoSelect || query == "" {
-		trendingQuery := "오늘의 주요 뉴스 시사 핫이슈"
-		log.Printf("인기 시사 이슈 검색 중 (%q)...", trendingQuery)
+		log.Printf("연합뉴스 실시간 주요 기사 검색 중...")
 		if logf != nil {
-			logf(fmt.Sprintf("● **`서칭을 시작합니다`**  |  `%s`", trendingQuery))
+			logf("● **`서칭을 시작합니다`**  |  `연합뉴스 실시간 주요 기사`")
 		}
-		trendingContext, err := search.Search(ctx, cfg.BraveAPIKey, trendingQuery, 5)
-		if err != nil {
-			return nil, fmt.Errorf("자동 주제 선정을 위한 검색 실패: %w", err)
-		}
+		
+		articles, err := search.FetchYonhapTopNews(ctx, 10)
+		if err != nil || len(articles) == 0 {
+			// Fallback to old behavior if Yonhap fails
+			log.Printf("연합뉴스 검색 실패, 기본 Brave Search로 폴백합니다: %v", err)
+			trendingQuery := "오늘의 주요 뉴스 시사 핫이슈"
+			trendingContext, err := search.Search(ctx, cfg.BraveAPIKey, trendingQuery, 5)
+			if err != nil {
+				return nil, fmt.Errorf("자동 주제 선정을 위한 검색 실패: %w", err)
+			}
+	
+			topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, trendingContext, logf)
+			if err != nil {
+				return nil, fmt.Errorf("자동 카드뉴스 주제 선정 실패: %w", err)
+			}
+			selectedTopic = topic
 
-		topic, err := llm.SelectTopic(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, trendingContext, logf)
-		if err != nil {
-			return nil, fmt.Errorf("자동 카드뉴스 주제 선정 실패: %w", err)
-		}
-		log.Printf("선정된 카드뉴스 주제: %q", topic)
-		selectedTopic = topic
-	}
+			log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
+			if logf != nil {
+				logf(fmt.Sprintf("● **`세부 정보 검색을 시작합니다`**  |  `%s`", selectedTopic))
+			}
+			groundingContext, err = search.Search(ctx, cfg.BraveAPIKey, selectedTopic, 3)
+			if err != nil {
+				return nil, fmt.Errorf("데이터 수집 실패: %w", err)
+			}
+		} else {
+			// Format articles for LLM
+			var contextBuilder strings.Builder
+			for _, art := range articles {
+				contextBuilder.WriteString(fmt.Sprintf("ID: %s\n제목: %s\n요약: %s\n섹션: %s\n\n", art.ID, art.Title, art.Description, art.Section))
+			}
 
-	log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
-	if logf != nil {
-		logf(fmt.Sprintf("● **`서칭을 시작합니다`**  |  `%s`", selectedTopic))
-	}
-	groundingContext, err := search.Search(ctx, cfg.BraveAPIKey, selectedTopic, 3)
-	if err != nil {
-		return nil, fmt.Errorf("데이터 수집 실패: %w", err)
+			// Ask LLM to pick one
+			selectedID, err := llm.SelectArticleID(ctx, cfg.OpenRouterAPIKey, cfg.LLMModel, contextBuilder.String(), logf)
+			if err != nil {
+				return nil, fmt.Errorf("기사 선정 실패: %w", err)
+			}
+
+			var selectedArticle *search.ArticleMeta
+			for _, art := range articles {
+				if art.ID == selectedID {
+					selectedArticle = &art
+					break
+				}
+			}
+
+			if selectedArticle == nil {
+				// Fallback if LLM hallucinations an ID
+				selectedArticle = &articles[0]
+			}
+
+			selectedTopic = selectedArticle.Title
+			log.Printf("선정된 카드뉴스 주제: %q", selectedTopic)
+
+			log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
+			if logf != nil {
+				logf(fmt.Sprintf("● **`기사 본문을 추출합니다`**  |  `%s`", selectedArticle.URL))
+			}
+
+			body, err := search.FetchYonhapArticleBody(ctx, selectedArticle.URL)
+			if err != nil {
+				return nil, fmt.Errorf("기사 본문 추출 실패: %w", err)
+			}
+			groundingContext = fmt.Sprintf("제목: %s\n요약: %s\n본문: %s", selectedArticle.Title, selectedArticle.Description, body)
+		}
+	} else {
+		log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
+		if logf != nil {
+			logf(fmt.Sprintf("● **`서칭을 시작합니다`**  |  `%s`", selectedTopic))
+		}
+		var err error
+		groundingContext, err = search.Search(ctx, cfg.BraveAPIKey, selectedTopic, 3)
+		if err != nil {
+			return nil, fmt.Errorf("데이터 수집 실패: %w", err)
+		}
 	}
 
 	log.Printf("[3/5] 카드 콘텐츠 생성...")
