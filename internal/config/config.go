@@ -23,6 +23,13 @@ var (
 	mu         sync.Mutex
 )
 
+// SetPath는 config.yml 파일의 경로를 변경합니다.
+func SetPath(path string) {
+	mu.Lock()
+	defer mu.Unlock()
+	configPath = path
+}
+
 // LoadConfig는 config.yml을 파싱하여 설정 객체를 생성합니다.
 // 모든 함수 시그니처는 context.Context를 첫 번째 매개변수로 받습니다.
 func LoadConfig(ctx context.Context) (*Config, error) {

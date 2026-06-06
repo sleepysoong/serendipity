@@ -1,5 +1,7 @@
 # 빌드 바이너리
 cardnews
+serendipity
+bot
 
 # 출력 디렉토리
 output/
@@ -10,5 +12,4 @@ output/
 
 # OS
 .DS_Store
-/bot
 config.yml
