@@ -88,16 +88,23 @@ func Run(ctx context.Context, cfg *config.Config, query, outputBaseDir string, a
 			selectedTopic = selectedArticle.Title
 			log.Printf("선정된 카드뉴스 주제: %q", selectedTopic)
 
-			log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)
-			if logf != nil {
-				logf(fmt.Sprintf("● **`기사 본문을 추출합니다`**  |  `%s`", selectedArticle.URL))
-			}
-
 			body, err := search.FetchYonhapArticleBody(ctx, selectedArticle.URL)
 			if err != nil {
 				return nil, fmt.Errorf("기사 본문 추출 실패: %w", err)
 			}
-			groundingContext = fmt.Sprintf("제목: %s\n요약: %s\n본문: %s", selectedArticle.Title, selectedArticle.Description, body)
+
+			// 교차 검증을 위한 추가 웹 검색 수행
+			log.Printf("교차 검증을 위해 추가 세부 컨텍스트 수집 중: %q...", selectedTopic)
+			if logf != nil {
+				logf(fmt.Sprintf("● **`교차 검증 및 보완 검색을 진행합니다`**  |  `%s`", selectedTopic))
+			}
+			crossCheckContext, err := search.Search(ctx, cfg.BraveAPIKey, selectedTopic, 3)
+			if err != nil {
+				log.Printf("교차 검증 검색 실패 (연합뉴스 본문 정보만 사용): %v", err)
+				crossCheckContext = "추가 웹 검색에 실패하였습니다."
+			}
+
+			groundingContext = fmt.Sprintf("제목: %s\n요약: %s\n본문: %s\n\n[교차 검증 및 보완 정보]\n%s", selectedArticle.Title, selectedArticle.Description, body, crossCheckContext)
 		}
 	} else {
 		log.Printf("[2/5] %q에 대한 세부 컨텍스트 수집...", selectedTopic)

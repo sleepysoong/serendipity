@@ -40,8 +40,9 @@ flowchart TD
     G --> H
     
     E --> I[3단계: 선택된 기사의 풀 텍스트 본문 추출]
+    I --> I2[3-1단계: 기사 주제로 Brave Search 추가 실행 교차 검증]
     H --> J[검색 결과 바탕으로 그라운딩 컨텍스트 구성]
-    I --> K[Grounding Context 완성]
+    I2 --> K[Grounding Context 완성]
     J --> K
     
     K --> L[4단계: LLM 카드뉴스 내용 생성]
@@ -73,13 +74,14 @@ flowchart TD
   3. LLM은 설명이나 수식어 없이 오직 **선택한 기사의 고유 ID (예: AKR2026...) 한 줄만 반환**하도록 제한됩니다.
   4. 만약 LLM이 존재하지 않는 ID를 임의로 출력(환각)할 경우를 대비하여 코드단에서 ID 검증 과정을 거치며, 검증 실패 시 기사 목록의 첫 번째 기사를 안전 장치로 자동 지정합니다.
 
-#### 3단계: 기사 본문 상세 추출 (Full Text Extraction)
-- **주요 관련 코드**: [yonhap.go](file:///home/user/serendipity/internal/search/yonhap.go) -> `FetchYonhapArticleBody()`
+#### 3단계: 기사 본문 상세 추출 및 교차 검증 (Full Text Extraction & Cross-Verification)
+- **주요 관련 코드**: [yonhap.go](file:///home/user/serendipity/internal/search/yonhap.go) -> `FetchYonhapArticleBody()`, [pipeline.go](file:///home/user/serendipity/internal/pipeline/pipeline.go)
 - **동작**:
   1. 선정된 기사의 원문 상세 URL(`https://www.yna.co.kr/view/AKR...`)로 전체 본문 HTML을 요청합니다.
   2. 연합뉴스의 기사 본문 영역을 지정하는 특정 HTML 태그인 `<article id="articleWrap">` 혹은 `<article id="dic_area">`를 정규식으로 검출하여 그 내부의 HTML 마크업만 파싱합니다.
-  3. `<[^>]*>` 태그 매칭 정규식을 실행하여 HTML 태그를 모두 걷어내고, `&nbsp;`, `&quot;`, `&apos;` 등 HTML 특수 기호를 사람이 읽을 수 있는 텍스트로 치환합니다.
-  4. 여러 개의 공백문자 및 줄바꿈을 일련의 공백 하나(` `)로 축소함으로써 LLM이 기사 팩트를 한눈에 읽을 수 있는 최적의 **그라운딩 컨텍스트(Grounding Context)**로 변형합니다.
+  3. `<[^>]*>` 태그 매칭 정규식을 실행하여 HTML 태그를 모두 걷어내고, `&nbsp;`, `&quot;`, `&apos;` 등 HTML 특수 기호를 사람이 읽을 수 있는 텍스트로 치환하고 공백을 정제합니다.
+  4. **교차 검증 및 보완 정보 수집**: 추출된 연합뉴스 원문 신뢰성을 더하고 정보의 다각화를 꾀하기 위해, 기사 제목(주제어)을 키워드로 삼아 **Brave Search API**를 활용하여 추가로 웹 검색(최대 3개 결과)을 수행합니다.
+  5. 연합뉴스 원본 본문 텍스트와 Brave Search 추가 검색 결과를 하나로 병합하여 풍부한 최종 **그라운딩 컨텍스트(Grounding Context)**를 완성합니다.
 
 #### 4단계: 카드뉴스 내용 생성 및 유효성 검사 (Cardnews Generation & Guardrail)
 - **주요 관련 코드**: [llm.go](file:///home/user/serendipity/internal/llm/llm.go) -> `GenerateCardNews()`, [generate_card_news_system.txt](file:///home/user/serendipity/prompts/generate_card_news_system.txt)
